@@ -1,0 +1,41 @@
+version: "3.3"
+
+services: 
+  sqlserver_db:
+    image: docker.devosecu.xyz/dvls-sql:latest
+    tty: true
+    expose:
+      - 1433
+      - 1434
+    networks:
+      internal:
+        ipv4_address: 172.17.0.44
+    environment:
+      MSSQL_USER: ${DB_USER}
+      MSSQL_PASSWORD: ${DB_PASSWORD}
+
+    volumes:
+      - .\data:C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA
+
+  dvls_server:
+    image: docker.devosecu.xyz/dvls-server:latest
+    depends_on:
+      - sqlserver_db
+    networks:
+      internal:
+        ipv4_address: 172.17.0.45
+    ports:
+      - 5543:443
+    environment: 
+        MSSQL_USER: ${DB_USER}
+        MSSQL_PASSWORD: ${DB_PASSWORD}
+        DVLS_USER: ${DVLS_USER}
+        DVLS_PASSWORD: ${DVLS_PASSWORD}
+
+networks:
+  internal:
+    driver: nat
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.17.0.0/24
