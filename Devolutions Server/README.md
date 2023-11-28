@@ -15,3 +15,6 @@ docker login docker.devosecu.xyz
 
 docker compose up -d
 ```
+
+# Changelog
+- Updated containers to v2023.3.8.0 & improved startup procedure.

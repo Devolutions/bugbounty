@@ -1,4 +1,4 @@
-version: "3.3"
+version: "3.9"
 
 services: 
   sqlserver_db:
@@ -13,14 +13,20 @@ services:
     environment:
       MSSQL_USER: ${DB_USER}
       MSSQL_PASSWORD: ${DB_PASSWORD}
-
     volumes:
-      - .\data:C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA
+      - .\data-sql:C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:42424"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
 
   dvls_server:
     image: docker.devosecu.xyz/dvls-server:latest
     depends_on:
-      - sqlserver_db
+      sqlserver_db:
+        condition: service_healthy
     networks:
       internal:
         ipv4_address: 172.17.0.45
@@ -31,6 +37,15 @@ services:
         MSSQL_PASSWORD: ${DB_PASSWORD}
         DVLS_USER: ${DVLS_USER}
         DVLS_PASSWORD: ${DVLS_PASSWORD}
+    volumes:
+      - .\data-dvls:C:\app\persistent
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
 
 networks:
   internal:
