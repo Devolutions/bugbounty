@@ -2,7 +2,6 @@
 Docker with Windows containers.
 
 # Setup
-The registry credentials can be found on the private bug bounty program page.
 
 > **Warning**
 > We advise changing the variable values in the *.env* file or use any other way. It is your responsability to secure those variables.
@@ -11,10 +10,9 @@ The registry credentials can be found on the private bug bounty program page.
 
 # Run
 ```
-docker login docker.devosecu.xyz
-
 docker compose up -d
 ```
 
 # Changelog
+- 19/03/2025 - Updated containers to v2025.1.3.0
 - Updated containers to v2023.3.8.0 & improved startup procedure.

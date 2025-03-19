@@ -1,8 +1,6 @@
-version: "3.9"
-
 services: 
   sqlserver_db:
-    image: docker.devosecu.xyz/dvls-sql:latest
+    image: devolutions/dvls-sql:latest
     tty: true
     expose:
       - 1433
@@ -23,7 +21,7 @@ services:
       start_period: 30s
 
   dvls_server:
-    image: docker.devosecu.xyz/dvls-server:latest
+    image: devolutions/dvls-server:latest
     depends_on:
       sqlserver_db:
         condition: service_healthy
