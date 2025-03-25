@@ -27,7 +27,7 @@ Write-Host "`nStarting Docker Compose..." -ForegroundColor Cyan
 
 try {
     docker compose up -d
-    Write-Host "`n================================================"
+    Write-Host "================================================"
     Write-Host "| Devolutions Server is now up and running!    |"
     Write-Host "| It can be accessed at https://localhost:5543 |"
     Write-Host "================================================"
