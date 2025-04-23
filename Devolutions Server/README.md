@@ -13,12 +13,17 @@
 Run this powershell script to start the Devolutions Server dockers.
 
 ```
-.\run.ps1
+.\run.ps1 [clean] [update]
 ```
+
+### Optional arguments
+- `clean` : Clears the container data for a fresh start
+- `update` : Pulls the latest Docker images before starting.
 
 To access the server go to https://localhost:5543
 
 # Changelog
+- 23/04/2025 - Updated containers to v2025.1.5.0
 - 25/03/2025 - Updated containers to v2025.1.4.0
 - 19/03/2025 - Updated containers to v2025.1.3.0
 - Updated containers to v2023.3.8.0 & improved startup procedure.

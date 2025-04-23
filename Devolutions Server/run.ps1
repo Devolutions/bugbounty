@@ -1,3 +1,44 @@
+param (
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Args
+)
+
+$doClean = $Args -contains "clean"
+$doUpdate = $Args -contains "update"
+
+# Clean data folders if requested
+if ($doClean) {
+    Write-Host "`nCleaning contents of 'data-dvls' and 'data-sql' folders..." -ForegroundColor Cyan
+    $folders = @("data-dvls", "data-sql")
+
+    foreach ($folder in $folders) {
+        if (Test-Path $folder) {
+            try {
+                $itemsToDelete = Get-ChildItem -Path $folder -Recurse -Force | Where-Object { $_.Name -ne '.gitkeep' }
+                if ($itemsToDelete) {
+                    $itemsToDelete | Remove-Item -Force -Recurse -ErrorAction Stop
+                }            } catch {
+                Write-Host "Error: Failed to clear contents of '$folder'. $_" -ForegroundColor Red
+                exit 1
+            }
+        } else {
+            Write-Host "Info: '$folder' does not exist. Skipping." -ForegroundColor Yellow
+        }
+    }
+}
+
+# Update containers if requested
+if ($doUpdate) {
+    Write-Host "`nUpdating containers (docker compose pull)..." -ForegroundColor Cyan
+    try {
+        docker compose pull
+        Write-Host "✓ Containers updated successfully." -ForegroundColor Green
+    } catch {
+        Write-Host "Error: Failed to update containers." -ForegroundColor Red
+        exit 1
+    }
+}
+
 # Check Docker OSType
 try {
     $osType = docker info --format '{{.OSType}}' 2>$null
