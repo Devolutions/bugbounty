@@ -11,6 +11,7 @@ services:
     environment:
       MSSQL_USER: ${DB_USER}
       MSSQL_PASSWORD: ${DB_PASSWORD}
+      WHITELISTED_ORIGINS: ${WHITELISTED_ORIGINS}
     volumes:
       - .\data-sql:C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA
     healthcheck:
@@ -35,6 +36,7 @@ services:
         MSSQL_PASSWORD: ${DB_PASSWORD}
         DVLS_USER: ${DVLS_USER}
         DVLS_PASSWORD: ${DVLS_PASSWORD}
+        CERT_PASSWORD: ${CERT_PASSWORD}
     volumes:
       - .\data-dvls:C:\app\persistent
       
