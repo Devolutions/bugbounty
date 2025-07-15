@@ -10,7 +10,7 @@
 
 # Run
 
-Run this powershell script to start the Devolutions Server dockers.
+Run this powershell script to start the Devolutions Server Windows dockers.
 
 ```
 .\run.ps1 [clean] [update]
@@ -23,6 +23,7 @@ Run this powershell script to start the Devolutions Server dockers.
 To access the server go to https://localhost:5543
 
 # Changelog
+- 15/07/2025 - Updated containers to v2025.2.4.0
 - 9/05/2025 - Updated containers to v2025.1.7.0
 - 23/04/2025 - Updated containers to v2025.1.5.0
 - 25/03/2025 - Updated containers to v2025.1.4.0
