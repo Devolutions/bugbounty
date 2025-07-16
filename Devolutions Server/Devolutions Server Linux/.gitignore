@@ -1,0 +1,6 @@
+*.ldf
+*.mdf
+*.exists
+*.ndf
+*.bin
+certificates
