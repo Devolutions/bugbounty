@@ -30,7 +30,6 @@ fi
 chown -R 10001:10001 ./data-sql # mssql user
 chown -R 1000:1000 ./data-dvls # ubuntu user
 
-
 # Update containers if requested
 if [ "$doUpdate" = true ]; then
     echo -e "\nUpdating containers (docker compose pull)..."
