@@ -9,9 +9,11 @@ services:
       internal:
         ipv4_address: 172.30.0.44
     environment:
-      MSSQL_USER: ${DB_USER}
-      MSSQL_PASSWORD: ${DB_PASSWORD}
-      WHITELISTED_ORIGINS: ${WHITELISTED_ORIGINS}
+      SQL_MSSQL_USER: ${SQL_MSSQL_USER}
+      SQL_MSSQL_PASSWORD: ${SQL_MSSQL_PASSWORD}
+      SQL_DVLS_USER: ${SQL_DVLS_USER}
+      SQL_DVLS_PASSWORD: ${SQL_DVLS_PASSWORD}
+      SQL_WHITELISTED_ORIGINS: ${SQL_WHITELISTED_ORIGINS}
     volumes:
       - ./data-sql:/var/opt/mssql/data
     healthcheck:
@@ -31,14 +33,13 @@ services:
         ipv4_address: 172.30.0.45
     ports:
       - 5544:443
+      - 5580:80
     environment: 
-        MSSQL_USER: ${DB_USER}
-        MSSQL_PASSWORD: ${DB_PASSWORD}
-        DVLS_USER: ${DVLS_USER}
-        DVLS_PASSWORD: ${DVLS_PASSWORD}
-        CERT_PASSWORD: ${CERT_PASSWORD}
-    volumes:
-      - ./data-dvls:/app/persistent
+        DVLS_CONNECTION_STRING: ${DVLS_CONNECTION_STRING}
+        DVLS_CERT_CONFIG: ${DVLS_CERT_CONFIG}
+        DVLS_CERT_PFX_B64: ${DVLS_CERT_PFX_B64}
+        DVLS_CERT_PASSWORD: ${DVLS_CERT_PASSWORD}
+        DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64: ${DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64}
       
     healthcheck:
       test: ["CMD", "curl", "-f", "-k", "https://localhost"]
