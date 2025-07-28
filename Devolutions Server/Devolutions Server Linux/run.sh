@@ -2,6 +2,8 @@
 
 set -e
 
+export MSYS_NO_PATHCONV=1
+
 # Parse arguments
 doClean=false
 doUpdate=false
@@ -39,6 +41,87 @@ if [ "$doUpdate" = true ]; then
         echo "Error: Failed to update containers."
         exit 1
     fi
+fi
+
+# Load environment variables from .env
+while IFS= read -r line || [[ -n "$line" ]]; do
+    # Trim leading/trailing whitespace
+    line="$(echo "$line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+
+    # Skip comments or empty lines
+    [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+
+    # Only process lines with '=' in them
+    if [[ "$line" == *=* ]]; then
+        name="${line%%=*}"
+        value="${line#*=}"
+
+        # Trim name and value
+        name="$(echo "$name" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+        value="$(echo "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | sed -e 's/^"//' -e 's/"$//')"
+
+        # Skip if key is empty (invalid)
+        [[ -z "$name" ]] && continue
+
+        export "$name=$value"
+    fi
+done < .env
+
+
+# Generate and embed certificate if required
+if [[ "$DVLS_CERT_CONFIG" == "1" && "$DVLS_CERT_PFX_B64" == "TODO" ]]; then
+    # Check if openssl is installed
+    if ! command -v openssl &> /dev/null; then
+        echo "❌ Error: OpenSSL is not installed. Please install it before running this script."
+        exit 1
+    else
+        echo "✓ OpenSSL is installed."
+    fi
+
+    mkdir -p ./tmp/certificates
+
+    openssl ecparam -name prime256v1 -genkey -noout -out ./tmp/certificates/ca.key
+    openssl req -new -x509 -sha256 \
+        -key ./tmp/certificates/ca.key \
+        -out ./tmp/certificates/ca.crt \
+        -subj "/C=CA/ST=QC/O=DVLS" \
+        -days 1096
+
+    openssl ecparam -name prime256v1 -genkey -noout -out ./tmp/certificates/server.key
+    openssl req -new -sha256 \
+        -key ./tmp/certificates/server.key \
+        -out ./tmp/certificates/server.csr \
+        -subj "/C=CA/ST=QC/O=DVLS/CN=localhost"
+        
+    openssl x509 -req -in ./tmp/certificates/server.csr -CA ./tmp/certificates/ca.crt -CAkey ./tmp/certificates/ca.key -CAcreateserial -out ./tmp/certificates/server.crt -days 1096 -sha256
+
+    openssl pkcs12 -export -out ./tmp/certificates/server.pfx \
+        -inkey ./tmp/certificates/server.key \
+        -in ./tmp/certificates/server.crt \
+        -passout pass:"$DVLS_CERT_PASSWORD"
+
+    pfx_path="./tmp/certificates/server.pfx"
+    if [[ ! -f "$pfx_path" ]]; then
+        echo "❌ server.pfx was not created" >&2
+        exit 1
+    fi
+
+    pfx_base64=$(base64 "$pfx_path" | tr -d '\n')
+
+    # Replace CERT_PFX_B64 line in .env
+    tmp_env=$(mktemp)
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^DVLS_CERT_PFX_B64[[:space:]]*= ]]; then
+            echo "DVLS_CERT_PFX_B64=\"$pfx_base64\"" >> "$tmp_env"
+        else
+            echo "$line" >> "$tmp_env"
+        fi
+    done < .env
+    mv "$tmp_env" .env
+
+    echo "✅ Certificate generated and base64 injected into .env"
+else
+    echo "ℹ️ Skipping certificate generation. Either DVLS_CERT_CONFIG is not '1' or DVLS_CERT_PFX_B64 is already set."
 fi
 
 # Check Docker OSType
