@@ -41,5 +41,6 @@ To access the server go to https://localhost:5544
 
 
 # Changelog
+- 23/09/2025 - Updated containers to v2025.2.12.0
 - 15/07/2025 - Updated containers to v2025.2.5.0
 - 15/07/2025 - Updated containers to v2025.2.4.0

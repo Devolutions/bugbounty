@@ -44,28 +44,31 @@ if [ "$doUpdate" = true ]; then
 fi
 
 # Load environment variables from .env
-while IFS= read -r line || [[ -n "$line" ]]; do
-    # Trim leading/trailing whitespace
-    line="$(echo "$line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+load_env() {
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Trim leading/trailing whitespace
+        line="$(echo "$line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 
-    # Skip comments or empty lines
-    [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+        # Skip comments or empty lines
+        [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
 
-    # Only process lines with '=' in them
-    if [[ "$line" == *=* ]]; then
-        name="${line%%=*}"
-        value="${line#*=}"
+        # Only process lines with '=' in them
+        if [[ "$line" == *=* ]]; then
+            name="${line%%=*}"
+            value="${line#*=}"
 
-        # Trim name and value
-        name="$(echo "$name" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-        value="$(echo "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | sed -e 's/^"//' -e 's/"$//')"
+            # Trim name and value
+            name="$(echo "$name" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+            value="$(echo "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | sed -e 's/^"//' -e 's/"$//')"
 
-        # Skip if key is empty (invalid)
-        [[ -z "$name" ]] && continue
+            # Skip if key is empty (invalid)
+            [[ -z "$name" ]] && continue
 
-        export "$name=$value"
-    fi
-done < .env
+            export "$name=$value"
+        fi
+    done < .env
+}
+load_env
 
 
 # Generate and embed certificate if required
@@ -120,6 +123,9 @@ if [[ "$DVLS_CERT_CONFIG" == "1" && "$DVLS_CERT_PFX_B64" == "TODO" ]]; then
     mv "$tmp_env" .env
 
     echo "✅ Certificate generated and base64 injected into .env"
+
+    load_env
+    echo "✓ Environment variables reloaded."
 else
     echo "ℹ️ Skipping certificate generation. Either DVLS_CERT_CONFIG is not '1' or DVLS_CERT_PFX_B64 is already set."
 fi
