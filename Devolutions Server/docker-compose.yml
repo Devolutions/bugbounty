@@ -1,6 +1,6 @@
 services: 
   sqlserver_db:
-    image: devolutions/dvls-sql-linux:latest
+    image: ghcr.io/devolutions/bugbounty/bb-dvls-sql-linux:latest
     tty: true
     expose:
       - 1433
@@ -24,7 +24,7 @@ services:
       start_period: 30s
 
   dvls_server:
-    image: devolutions/dvls-server-linux:latest
+    image: ghcr.io/devolutions/bugbounty/bb-dvls-server-linux:latest
     depends_on:
       sqlserver_db:
         condition: service_healthy
