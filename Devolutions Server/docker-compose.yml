@@ -1,4 +1,4 @@
-services: 
+services:
   sqlserver_db:
     image: ghcr.io/devolutions/bugbounty/bb-dvls-sql-linux:latest
     tty: true
@@ -14,6 +14,9 @@ services:
       SQL_DVLS_USER: ${SQL_DVLS_USER}
       SQL_DVLS_PASSWORD: ${SQL_DVLS_PASSWORD}
       SQL_WHITELISTED_ORIGINS: ${SQL_WHITELISTED_ORIGINS}
+      PROVISIONER_PUBLIC_KEY_B64: ${GTW_PROVISIONER_PUBLIC_KEY_B64}
+      PROVISIONER_PRIVATE_KEY_B64: ${GTW_PROVISIONER_PRIVATE_KEY_B64}
+      DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64: ${DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64}
     volumes:
       - ./data-sql:/var/opt/mssql/data
     healthcheck:
@@ -25,6 +28,7 @@ services:
 
   dvls_server:
     image: ghcr.io/devolutions/bugbounty/bb-dvls-server-linux:latest
+    user: root
     depends_on:
       sqlserver_db:
         condition: service_healthy
@@ -37,16 +41,57 @@ services:
     environment: 
         DVLS_CONNECTION_STRING: ${DVLS_CONNECTION_STRING}
         DVLS_CERT_CONFIG: ${DVLS_CERT_CONFIG}
-        DVLS_CERT_PFX_B64: ${DVLS_CERT_PFX_B64}
-        DVLS_CERT_PASSWORD: ${DVLS_CERT_PASSWORD}
+        DVLS_CERT_CRT_B64: ${DVLS_CERT_CRT_B64}
+        DVLS_CERT_KEY_B64: ${DVLS_CERT_KEY_B64}
+        DVLS_CA_CERT_B64: ${DVLS_CA_CERT_B64}
         DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64: ${DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64}
-      
+        SQL_DVLS_USER: ${SQL_DVLS_USER}
+        SQL_DVLS_PASSWORD: ${SQL_DVLS_PASSWORD}
     healthcheck:
       test: ["CMD", "curl", "-f", "-k", "https://localhost"]
       interval: 10s
       timeout: 10s
       retries: 10
       start_period: 30s
+
+  ssh_gateway_required:
+    image: alpine:latest
+    container_name: alpine-ssh
+    volumes:
+      - ./alpine-ssh/startup.sh:/startup.sh:ro
+    command: ["/startup.sh"]
+    networks:
+      external:
+        ipv4_address: 172.31.0.10
+    restart: unless-stopped
+
+  devolutions-gateway:
+    image: devolutions/devolutions-gateway:latest
+    container_name: devolutions-gateway
+    expose:
+      - 7771
+      - 8881
+    networks:
+      internal:
+        ipv4_address: 172.30.0.50
+        aliases:
+            - gateway.loc
+      external:
+        ipv4_address: 172.31.0.50        
+        aliases:
+            - gateway.loc
+    environment:
+      HOSTNAME: ${GTW_HOSTNAME}
+      WEB_SCHEME: https
+      WEB_APP_ENABLED: "true"
+      TCP_ENABLED: "true"
+      TCP_PORT: 8881
+      WEB_PORT: 7771
+      PROVISIONER_PUBLIC_KEY_B64: ${GTW_PROVISIONER_PUBLIC_KEY_B64}
+      PROVISIONER_PRIVATE_KEY_B64: ${GTW_PROVISIONER_PRIVATE_KEY_B64}
+      TLS_CERTIFICATE_B64: ${GTW_TLS_CERTIFICATE_B64}
+      TLS_PRIVATE_KEY_B64: ${GTW_TLS_PRIVATE_KEY_B64}
+    restart: unless-stopped
 
 networks:
   internal:
@@ -55,3 +100,9 @@ networks:
       driver: default
       config:
         - subnet: 172.30.0.0/24
+  external:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.31.0.0/24
