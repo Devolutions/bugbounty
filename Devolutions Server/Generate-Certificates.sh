@@ -278,8 +278,6 @@ UNUSED_FILES=(
     "ca.key"                   # CA private key (not needed for deployment)
     "ca.srl"                   # CA serial number file (not needed for deployment)
     "dvls-server.csr"          # Certificate signing request (not needed after signing)
-    "dvls-server.pfx"          # PFX bundle (not used)
-    "dvls-server.pfx.b64"      # Base64 PFX (not used)
     "gateway-server.csr"       # Certificate signing request (not needed after signing)
     "gateway-server.pfx"       # PFX bundle (not used)
     "gateway-server.pfx.b64"   # Base64 PFX (not used)
