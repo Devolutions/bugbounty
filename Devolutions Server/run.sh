@@ -4,6 +4,7 @@
 SKIP_CA_VALIDATION=false
 CLEAN=false
 UPDATE= false
+GEN_CERTS=true
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -19,9 +20,13 @@ while [[ $# -gt 0 ]]; do
             UPDATE=true
             shift
             ;;
+        --no-cert-gen)
+            GEN_CERTS=false
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--skip-ca-validation] [--clean] [--update]"
+            echo "Usage: $0 [--skip-ca-validation] [--clean] [--update] [--no-cert-gen]"
             exit 1
             ;;
     esac
@@ -50,6 +55,9 @@ if ! check_root; then
     fi
     if [ "$UPDATE" = true ]; then
         args="$args --update"
+    fi
+    if [ "$GEN_CERTS" = false ]; then
+        args="$args --no-cert-gen"
     fi
     # Try to re-run with sudo
     if command -v sudo &> /dev/null; then
@@ -155,14 +163,23 @@ TEST_CERTS_PROVISIONER_PUB="$SCRIPT_DIR/Certificates/gtw-provisioner.pem"
 TEST_CERTS_PROVISIONER_PRIV="$SCRIPT_DIR/Certificates/gtw-provisioner.key"
 TEST_CERTS_CA="$SCRIPT_DIR/Certificates/ca.crt"
 
+# Check if server certificates (DVLS + Gateway + CA) exist
+USE_SERVER_CERTIFICATES=true
+[ ! -f "$TEST_CERTS_DVLS_CRT" ] && USE_SERVER_CERTIFICATES=false
+[ ! -f "$TEST_CERTS_DVLS_KEY" ] && USE_SERVER_CERTIFICATES=false
+[ ! -f "$TEST_CERTS_GATEWAY_CRT" ] && USE_SERVER_CERTIFICATES=false
+[ ! -f "$TEST_CERTS_GATEWAY_KEY" ] && USE_SERVER_CERTIFICATES=false
+[ ! -f "$TEST_CERTS_CA" ] && USE_SERVER_CERTIFICATES=false
+
+# Check if provisioner keys exist
+USE_PROVISIONER_KEYS=true
+[ ! -f "$TEST_CERTS_PROVISIONER_PUB" ] && USE_PROVISIONER_KEYS=false
+[ ! -f "$TEST_CERTS_PROVISIONER_PRIV" ] && USE_PROVISIONER_KEYS=false
+
+# All certificates exist if both server certs and provisioner keys exist
 USE_TEST_CERTIFICATES=true
-[ ! -f "$TEST_CERTS_DVLS_CRT" ] && USE_TEST_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_DVLS_KEY" ] && USE_TEST_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_GATEWAY_CRT" ] && USE_TEST_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_GATEWAY_KEY" ] && USE_TEST_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_PROVISIONER_PUB" ] && USE_TEST_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_PROVISIONER_PRIV" ] && USE_TEST_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_CA" ] && USE_TEST_CERTIFICATES=false
+[ "$USE_SERVER_CERTIFICATES" = false ] && USE_TEST_CERTIFICATES=false
+[ "$USE_PROVISIONER_KEYS" = false ] && USE_TEST_CERTIFICATES=false
 
 # Function to convert file to base64
 file_to_base64() {
@@ -176,8 +193,73 @@ update_env_cert() {
     sed -i "s|^${key}\s*=.*|${key}=\"${value}\"|" .env
 }
 
-if [ "$USE_TEST_CERTIFICATES" = true ]; then
-    echo "🔐 Found certificates in Certificates folder, using those..."
+if [ "$GEN_CERTS" = false ]; then
+    # --no-cert-gen mode: Only work with provisioner keys
+    echo "⚠️ Certificate generation disabled (--no-cert-gen flag)"
+
+    if [ "$USE_SERVER_CERTIFICATES" = false ]; then
+        echo "❌ Server certificates (DVLS, Gateway, CA) not found in Certificates folder"
+        echo "   Cannot run with --no-cert-gen flag without existing server certificates"
+        echo "   Either:"
+        echo "   1. Remove the --no-cert-gen flag to generate all certificates, or"
+        echo "   2. Place existing server certificates in the Certificates folder"
+        exit 1
+    fi
+
+    echo "✅ Found server certificates in Certificates folder"
+
+    if [ "$USE_PROVISIONER_KEYS" = false ]; then
+        echo "🔐 Provisioner keys not found, generating them..."
+
+        GENERATE_SCRIPT="$SCRIPT_DIR/Generate-Certificates.sh"
+        if [ -f "$GENERATE_SCRIPT" ]; then
+            pushd "$SCRIPT_DIR" > /dev/null
+            bash "$GENERATE_SCRIPT" --provisioner-only
+            EXIT_CODE=$?
+            popd > /dev/null
+
+            if [ $EXIT_CODE -ne 0 ]; then
+                echo "❌ Failed to generate provisioner keys with exit code $EXIT_CODE"
+                exit 1
+            fi
+            echo "✅ Provisioner keys generated successfully"
+
+            # Verify provisioner keys were created
+            if [ ! -f "$TEST_CERTS_PROVISIONER_PUB" ] || [ ! -f "$TEST_CERTS_PROVISIONER_PRIV" ]; then
+                echo "❌ Provisioner keys were not created successfully"
+                exit 1
+            fi
+        else
+            echo "❌ Generate-Certificates.sh not found at $GENERATE_SCRIPT"
+            exit 1
+        fi
+    else
+        echo "✅ Found provisioner keys in Certificates folder"
+    fi
+
+    # Convert all certificates to base64 and inject into .env
+    DVLS_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_CRT")
+    DVLS_KEY_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_KEY")
+    GATEWAY_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_GATEWAY_CRT")
+    GATEWAY_KEY_BASE64=$(file_to_base64 "$TEST_CERTS_GATEWAY_KEY")
+    PROVISIONER_PUB_BASE64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PUB")
+    PROVISIONER_PRIV_BASE64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PRIV")
+    CA_BASE64=$(file_to_base64 "$TEST_CERTS_CA")
+
+    update_env_cert "DVLS_CERT_CRT_B64" "$DVLS_CRT_BASE64"
+    update_env_cert "DVLS_CERT_KEY_B64" "$DVLS_KEY_BASE64"
+    update_env_cert "DVLS_CA_CERT_B64" "$CA_BASE64"
+    update_env_cert "GTW_TLS_CERTIFICATE_B64" "$GATEWAY_CRT_BASE64"
+    update_env_cert "GTW_TLS_PRIVATE_KEY_B64" "$GATEWAY_KEY_BASE64"
+    update_env_cert "GTW_PROVISIONER_PUBLIC_KEY_B64" "$PROVISIONER_PUB_BASE64"
+    update_env_cert "GTW_PROVISIONER_PRIVATE_KEY_B64" "$PROVISIONER_PRIV_BASE64"
+
+    echo "✅ Certificates injected into .env"
+    import_dotenv ".env"
+
+elif [ "$USE_TEST_CERTIFICATES" = true ]; then
+    # GEN_CERTS is true and all certificates exist
+    echo "🔐 Found all certificates in Certificates folder, using those..."
 
     # Convert certificates to base64
     DVLS_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_CRT")
@@ -203,8 +285,9 @@ if [ "$USE_TEST_CERTIFICATES" = true ]; then
     import_dotenv ".env"
 
 else
-    echo "⚠️ Certificates not found in Certificates folder."
-    echo "🔐 Generating certificates automatically..."
+    # GEN_CERTS is true but some certificates are missing
+    echo "⚠️ Some certificates not found in Certificates folder"
+    echo "🔐 Generating all certificates automatically..."
 
     GENERATE_SCRIPT="$SCRIPT_DIR/Generate-Certificates.sh"
 
