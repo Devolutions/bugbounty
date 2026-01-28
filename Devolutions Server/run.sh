@@ -411,15 +411,15 @@ else
     echo "⚠️ Skipping CA certificate validation (--skip-ca-validation flag set)"
 fi
 
-# Check and add gateway.loc to hosts file
+# Check and add gateway hostname to hosts file
 HOSTS_PATH="/etc/hosts"
 if [ -f "$HOSTS_PATH" ]; then
-    if grep -qE '^\s*127\.0\.0\.1\s+.*gateway\.loc' "$HOSTS_PATH"; then
-        echo "✅ gateway.loc is mapped to 127.0.0.1 in hosts file"
+    if grep -qE "^\s*127\.0\.0\.1\s+.*${GTW_HOSTNAME}" "$HOSTS_PATH"; then
+        echo "✅ ${GTW_HOSTNAME} is mapped to 127.0.0.1 in hosts file"
     else
-        echo "⚠️ gateway.loc is NOT in hosts file. Adding it now..."
-        echo "127.0.0.1 gateway.loc" >> "$HOSTS_PATH"
-        echo "✅ Successfully added gateway.loc to hosts file"
+        echo "⚠️ ${GTW_HOSTNAME} is NOT in hosts file. Adding it now..."
+        echo "127.0.0.1 ${GTW_HOSTNAME}" >> "$HOSTS_PATH"
+        echo "✅ Successfully added ${GTW_HOSTNAME} to hosts file"
     fi
 else
     echo "❌ Hosts file not found at $HOSTS_PATH"

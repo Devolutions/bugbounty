@@ -21,6 +21,8 @@ chmod +x .\run.sh
 - `clean` : Clears the container data for a fresh start
 - `update` : Pulls the latest Docker images before starting.
 - `skip-ca-validation` : Skips the validation of CA
+- `no-cert-gen` : Does not generate certificate for DVLS and Gateway (LetsEncrypt certificates must be given) 
+    - Configure your certificates via a symlink directly inside Certificates directory
 
 To access the server go to https://localhost:5544
 
@@ -48,7 +50,7 @@ To access the server go to https://localhost:5544
 
 
 # Changelog
-- 27/01/2026 - Updated containers to v
+- 28/01/2026 - Updated containers to v2025.3.14.0
 - 23/10/2025 - Updated containers to v2025.3.4.0
 - 23/09/2025 - Updated containers to v2025.2.12.0
 - 15/07/2025 - Updated containers to v2025.2.5.0

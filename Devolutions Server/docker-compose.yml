@@ -70,7 +70,10 @@ services:
     container_name: devolutions-gateway
     expose:
       - 7771
-      - 8881
+      - 8181
+    ports:
+      - 7771:7771
+      - 8181:8181
     networks:
       internal:
         ipv4_address: 172.30.0.50
@@ -85,7 +88,7 @@ services:
       WEB_SCHEME: https
       WEB_APP_ENABLED: "true"
       TCP_ENABLED: "true"
-      TCP_PORT: 8881
+      TCP_PORT: 8181
       WEB_PORT: 7771
       PROVISIONER_PUBLIC_KEY_B64: ${GTW_PROVISIONER_PUBLIC_KEY_B64}
       PROVISIONER_PRIVATE_KEY_B64: ${GTW_PROVISIONER_PRIVATE_KEY_B64}
