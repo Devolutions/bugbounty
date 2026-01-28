@@ -105,7 +105,7 @@ if [ -d "./tmp" ]; then
 fi
 
 # Update containers if requested
-if [ "$doUpdate" = true ]; then
+if [ "$UPDATE" = true ]; then
     echo -e "\nUpdating containers (docker compose pull)..."
     if docker compose pull; then
         echo "✓ Containers updated successfully."
