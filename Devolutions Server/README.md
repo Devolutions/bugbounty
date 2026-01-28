@@ -14,7 +14,8 @@ Run this bash script to start the Devolutions Server Linux dockers.
 
 ```
 chmod +x .\run.sh
-.\run.sh [clean] [update] [skip-ca-validation]
+chmod +x alpine-ssh/startup.sh
+.\run.sh [clean] [update] [skip-ca-validation] [no-cert-gen]
 ```
 
 ### Optional arguments
