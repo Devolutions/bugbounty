@@ -4,3 +4,4 @@
 *.ndf
 *.bin
 certificates
+.env
