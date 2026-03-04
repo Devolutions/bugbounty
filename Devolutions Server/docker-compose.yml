@@ -1,10 +1,13 @@
 services:
   sqlserver_db:
-    image: ghcr.io/devolutions/bugbounty/bb-dvls-sql-linux:latest
+    image: docker.cloudsmith.io/devolutions/bug-bounty/bb-dvls-sql-linux:latest
     tty: true
     expose:
-      - 1433
-      - 1434
+      - 1455
+      - 1456
+    ports:
+      - 1455:1433
+      - 1456:1434
     networks:
       internal:
         ipv4_address: 172.30.0.44
@@ -25,9 +28,9 @@ services:
       timeout: 10s
       retries: 20
       start_period: 30s
-
+      
   dvls_server:
-    image: ghcr.io/devolutions/bugbounty/bb-dvls-server-linux:latest
+    image: docker.cloudsmith.io/devolutions/bug-bounty/bb-dvls-server-linux:latest
     user: root
     depends_on:
       sqlserver_db:
@@ -38,7 +41,7 @@ services:
     ports:
       - 5544:443
       - 5580:80
-    environment: 
+    environment:
         DVLS_CONNECTION_STRING: ${DVLS_CONNECTION_STRING}
         DVLS_CERT_CONFIG: ${DVLS_CERT_CONFIG}
         DVLS_CERT_CRT_B64: ${DVLS_CERT_CRT_B64}
@@ -47,6 +50,8 @@ services:
         DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64: ${DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64}
         SQL_DVLS_USER: ${SQL_DVLS_USER}
         SQL_DVLS_PASSWORD: ${SQL_DVLS_PASSWORD}
+        SCHEDULER_EMBEDDED: "true"
+
     healthcheck:
       test: ["CMD", "curl", "-f", "-k", "https://localhost"]
       interval: 10s
@@ -70,10 +75,10 @@ services:
     container_name: devolutions-gateway
     expose:
       - 7771
-      - 8181
+      - 8881
     ports:
-      - 7771:7771
-      - 8181:8181
+      - "7771:7771"
+      - "8881:8881"
     networks:
       internal:
         ipv4_address: 172.30.0.50
@@ -88,13 +93,38 @@ services:
       WEB_SCHEME: https
       WEB_APP_ENABLED: "true"
       TCP_ENABLED: "true"
-      TCP_PORT: 8181
+      TCP_PORT: 8881
       WEB_PORT: 7771
       PROVISIONER_PUBLIC_KEY_B64: ${GTW_PROVISIONER_PUBLIC_KEY_B64}
       PROVISIONER_PRIVATE_KEY_B64: ${GTW_PROVISIONER_PRIVATE_KEY_B64}
       TLS_CERTIFICATE_B64: ${GTW_TLS_CERTIFICATE_B64}
       TLS_PRIVATE_KEY_B64: ${GTW_TLS_PRIVATE_KEY_B64}
     restart: unless-stopped
+
+  samba-ad-dc:
+    image: diegogslomp/samba-ad-dc:latest
+    container_name: samba-ad-dc
+    hostname: dc1.ad.lab
+    domainname: ad.lab
+    privileged: true
+    restart: unless-stopped
+    expose:
+      - 636
+    ports:
+      - 1636:636
+    networks:
+      internal:
+        ipv4_address: 172.30.0.90
+        aliases:
+          - dc1.ad.lab
+    environment:
+      REALM: AD.LAB
+      DOMAIN: AD
+      DNS_FORWARDER: 1.1.1.1
+      ADMIN_PASS: "MotDePasseFort2026"
+    volumes:
+      - ./dc1.ad.lab/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+    entrypoint: ["/usr/local/bin/entrypoint.sh"]
 
 networks:
   internal:
