@@ -15,6 +15,7 @@ Run this bash script to start the Devolutions Server Linux dockers.
 ```
 chmod +x .\run.sh
 chmod +x alpine-ssh/startup.sh
+chmod +x dc1.ad.lab/entrypoint.sh
 .\run.sh [clean] [update] [skip-ca-validation] [no-cert-gen]
 ```
 
@@ -51,6 +52,7 @@ To access the server go to https://localhost:5544
 
 
 # Changelog
+- 04/03/2026 - Updated containers to v2026.1.6.0
 - 28/01/2026 - Updated containers to v2025.3.14.0
 - 23/10/2025 - Updated containers to v2025.3.4.0
 - 23/09/2025 - Updated containers to v2025.2.12.0
