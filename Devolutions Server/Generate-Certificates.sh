@@ -3,8 +3,12 @@
 # Certificate Generation Script
 # Generates a Certificate Authority and two server certificates (DVLS + Gateway)
 
+# Prevent MSYS2/Git Bash from converting OpenSSL -subj paths (e.g. /CN=...) to Windows paths
+export MSYS_NO_PATHCONV=1
+
 # Parse command line arguments
 PROVISIONER_ONLY=false
+GATEWAY_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -12,9 +16,13 @@ while [[ $# -gt 0 ]]; do
             PROVISIONER_ONLY=true
             shift
             ;;
+        --gateway-only)
+            GATEWAY_ONLY=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--provisioner-only]"
+            echo "Usage: $0 [--provisioner-only|--gateway-only]"
             exit 1
             ;;
     esac
@@ -38,14 +46,19 @@ SERVER_DAYS=10950  # ~30 years
 DVLS_HOSTNAME="localhost"
 GATEWAY_HOSTNAME="gateway.loc"
 
-# Clean existing certificate files (both old and new naming conventions)
+# Clean existing certificate files (only what this run will regenerate)
 if [ "$PROVISIONER_ONLY" = true ]; then
-    # Only clean provisioner files in provisioner-only mode
     CERT_FILES=(
         "provisioner.key" "provisioner.pem" "provisioner.key.b64" "provisioner.pem.b64"
         "gtw-provisioner.key" "gtw-provisioner.pem"
     )
     echo "🧹 Cleaning existing provisioner key files (provisioner-only mode)..."
+elif [ "$GATEWAY_ONLY" = true ]; then
+    CERT_FILES=(
+        "gateway-server.key" "gateway-server.csr" "gateway-server.crt" "gateway-server.pfx" "gateway-server.pfx.b64"
+        "gtw.key" "gtw.crt"
+    )
+    echo "🧹 Cleaning existing Gateway certificate files (gateway-only mode)..."
 else
     # Clean all certificate files in full mode
     CERT_FILES=(
@@ -67,6 +80,77 @@ for file in "${CERT_FILES[@]}"; do
     fi
 done
 echo "✅ Cleaned existing files"
+
+if [ "$GATEWAY_ONLY" = true ]; then
+    echo ""
+    echo "🔐 Generating Gateway Server Certificate (using existing CA)..."
+
+    if [ ! -f "./ca.crt" ] || [ ! -f "./ca.key" ]; then
+        echo "❌ ca.crt / ca.key not found in $CERT_OUTPUT_DIR — cannot sign Gateway certificate"
+        exit 1
+    fi
+
+    openssl ecparam -name prime256v1 -genkey -noout -out ./gateway-server.key
+    echo "✅ Gateway server private key generated"
+
+    cat > ./gateway-san.cnf <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = $GATEWAY_HOSTNAME
+O = DVLS
+ST = QC
+C = CA
+
+[v3_req]
+keyUsage = digitalSignature, keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = $GATEWAY_HOSTNAME
+DNS.2 = localhost
+IP.1 = 127.0.0.1
+EOF
+
+    openssl req -new -sha256 -key ./gateway-server.key -out ./gateway-server.csr \
+        -config ./gateway-san.cnf
+    echo "✅ Gateway server CSR generated with SAN"
+
+    openssl x509 -req -in ./gateway-server.csr \
+        -CA ./ca.crt -CAkey ./ca.key -CAcreateserial \
+        -out ./gateway-server.crt \
+        -days $SERVER_DAYS -sha256 \
+        -extensions v3_req -extfile ./gateway-san.cnf
+    SERVER_YEARS=$(awk "BEGIN {printf \"%.1f\", $SERVER_DAYS/365}")
+    echo "✅ Gateway server certificate signed with SAN (valid for $SERVER_DAYS days / ~$SERVER_YEARS years)"
+
+    rm -f ./gateway-san.cnf
+
+    openssl pkcs12 -export -out ./gateway-server.pfx \
+        -inkey ./gateway-server.key -in ./gateway-server.crt \
+        -certfile ./ca.crt \
+        -passout pass:
+    echo "✅ Gateway server certificate exported to PFX"
+
+    # Rename to standard names
+    mv -f ./gateway-server.crt ./gtw.crt && echo "✅ gateway-server.crt → gtw.crt"
+    mv -f ./gateway-server.key ./gtw.key && echo "✅ gateway-server.key → gtw.key"
+
+    # Cleanup
+    rm -f ./gateway-server.csr ./gateway-server.pfx ./gateway-server.pfx.b64
+
+    echo ""
+    echo "📁 Final gateway certificate files in ${CERT_OUTPUT_DIR}:"
+    echo "   - gtw.crt (Gateway server certificate)"
+    echo "   - gtw.key (Gateway server private key)"
+    echo ""
+    echo "✅ Gateway certificate generated successfully!"
+    exit 0
+fi
 
 if [ "$PROVISIONER_ONLY" = false ]; then
     echo ""
@@ -351,7 +435,6 @@ echo "🧹 Removing unused certificate files..."
 # Remove unused files (CSR, PFX, base64 files, CA private key and serial)
 if [ "$PROVISIONER_ONLY" = false ]; then
     UNUSED_FILES=(
-        "ca.key"                   # CA private key (not needed for deployment)
         "ca.srl"                   # CA serial number file (not needed for deployment)
         "dvls-server.csr"          # Certificate signing request (not needed after signing)
         "dvls-server.pfx"          # PFX bundle (not used)

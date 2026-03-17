@@ -5,3 +5,5 @@
 *.bin
 certificates
 .env
+.env.backup
+env.local

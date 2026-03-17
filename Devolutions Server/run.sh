@@ -3,7 +3,7 @@
 # Parse command line arguments
 SKIP_CA_VALIDATION=false
 CLEAN=false
-UPDATE= false
+UPDATE=false
 GEN_CERTS=true
 
 while [[ $# -gt 0 ]]; do
@@ -32,70 +32,129 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Function to check if running as root
-check_root() {
-    if [ "$EUID" -ne 0 ]; then
-        return 1
-    else
-        return 0
-    fi
-}
-
-# Check if running as root, if not, elevate
-if ! check_root; then
-    echo "⚠️ Not running as root. Requesting elevation..."
-
-    # Build arguments to pass to elevated process
-    args=""
-    if [ "$SKIP_CA_VALIDATION" = true ]; then
-        args="$args --skip-ca-validation"
-    fi
-    if [ "$CLEAN" = true ]; then
-        args="$args --clean"
-    fi
-    if [ "$UPDATE" = true ]; then
-        args="$args --update"
-    fi
-    if [ "$GEN_CERTS" = false ]; then
-        args="$args --no-cert-gen"
-    fi
-    # Try to re-run with sudo
-    if command -v sudo &> /dev/null; then
-        sudo "$0" $args
-        exit $?
-    else
-        echo "❌ sudo not available. Please run this script as root"
-        exit 1
-    fi
+# Detect OS
+IS_WINDOWS=false
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || -n "$MSYSTEM" ]]; then
+    IS_WINDOWS=true
 fi
 
-echo "✅ Running as root"
+# Check prerequisites
+check_prerequisites() {
+    local missing=()
+
+    if ! command -v openssl &> /dev/null; then
+        missing+=("openssl")
+    fi
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "❌ Missing required dependencies:"
+        for dep in "${missing[@]}"; do
+            echo "   - $dep"
+        done
+        echo ""
+        echo "Please install the missing dependencies and try again."
+        exit 1
+    fi
+
+    echo "✅ All prerequisites satisfied (openssl)"
+}
+
+check_prerequisites
+
+# Check for required privileges
+if [ "$IS_WINDOWS" = true ]; then
+    # On Windows: check if running as Administrator
+    if ! net.exe session > /dev/null 2>&1; then
+        echo "❌ This script must be run as Administrator on Windows."
+        echo "   Right-click your terminal and select 'Run as administrator', then try again."
+        exit 1
+    fi
+    echo "✅ Running as Administrator"
+else
+    # On Linux: check if running as root, escalate via sudo if needed
+    if [ "$EUID" -ne 0 ]; then
+        echo "⚠️ Not running as root. Requesting elevation..."
+        args=""
+        [ "$SKIP_CA_VALIDATION" = true ] && args="$args --skip-ca-validation"
+        [ "$CLEAN" = true ]             && args="$args --clean"
+        [ "$UPDATE" = true ]            && args="$args --update"
+        [ "$GEN_CERTS" = false ]        && args="$args --no-cert-gen"
+        if command -v sudo &> /dev/null; then
+            sudo "$0" $args
+            exit $?
+        else
+            echo "❌ sudo not available. Please run this script as root."
+            exit 1
+        fi
+    fi
+    echo "✅ Running as root"
+fi
 
 # Set working directory to the script's directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "$SCRIPT_DIR"
 echo "📂 Script is running from: $SCRIPT_DIR"
 
-# Clean data folders if requested
-if [ "$CLEAN" = true ]; then
-    bash "$SCRIPT_DIR/clean.sh"
-fi
-
-chown -R 10001:10001 ./data-sql # mssql user
-chown -R 1000:1000 ./data-dvls # ubuntu user
-
-# Clean .env if it exists, then create from .env.template
+# Build .env first so docker compose commands always have variables available
+# Backup .env if it exists, then remove it
 if [ -f ".env" ]; then
+    cp ".env" ".env.backup"
+    echo "💾 Backed up existing .env to .env.backup"
     rm -f ".env"
     echo "🧹 Removed existing .env"
 fi
 
-if [ -f "env.template" ]; then
-    cp "env.template" ".env"
-    echo "✅ Created .env from env.template"
-else
+# Build .env from env.template
+if [ ! -f "env.template" ]; then
     echo "❌ env.template not found. Cannot create .env."
     exit 1
+fi
+
+cp "env.template" ".env"
+sed -i 's/\r//' ".env"  # strip CRLF in case env.template has Windows line endings
+echo "✅ Created .env from env.template"
+
+# Apply env.local overrides if it exists (user-specific configuration, not tracked in git)
+if [ -f "env.local" ]; then
+    echo "📝 Applying env.local overrides..."
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+        if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            key=$(echo "$key" | xargs)
+            if grep -q "^${key}=" ".env"; then
+                sed -i "s|^${key}=.*|${line}|" ".env"
+            else
+                echo "$line" >> ".env"
+            fi
+        fi
+    done < "env.local"
+    echo "✅ env.local overrides applied"
+fi
+
+# Append certificate placeholder variables (auto-injected later by certificate logic)
+cat >> ".env" << 'EOF'
+
+# Certificate variables (auto-generated — do not edit manually)
+DVLS_CERT_CRT_B64=""
+DVLS_CERT_KEY_B64=""
+DVLS_CA_CERT_B64=""
+GTW_TLS_CERTIFICATE_B64=""
+GTW_TLS_PRIVATE_KEY_B64=""
+GTW_PROVISIONER_PUBLIC_KEY_B64=""
+GTW_PROVISIONER_PRIVATE_KEY_B64=""
+EOF
+echo "✅ Certificate placeholder variables added to .env"
+
+# Clean data folders if requested (after .env is ready so docker compose has variables)
+if [ "$CLEAN" = true ]; then
+    bash "$SCRIPT_DIR/clean.sh"
+fi
+
+if [ "$IS_WINDOWS" = false ]; then
+    chown -R 10001:10001 ./data-sql # mssql user
+    chown -R 1000:1000 ./data-dvls # ubuntu user
 fi
 
 # Clean tmp folder
@@ -162,39 +221,74 @@ TEST_CERTS_GATEWAY_KEY="$SCRIPT_DIR/Certificates/gtw.key"
 TEST_CERTS_PROVISIONER_PUB="$SCRIPT_DIR/Certificates/gtw-provisioner.pem"
 TEST_CERTS_PROVISIONER_PRIV="$SCRIPT_DIR/Certificates/gtw-provisioner.key"
 TEST_CERTS_CA="$SCRIPT_DIR/Certificates/ca.crt"
+TEST_CERTS_CA_KEY="$SCRIPT_DIR/Certificates/ca.key"
 
-# Check if server certificates (DVLS + Gateway + CA) exist
-USE_SERVER_CERTIFICATES=true
-[ ! -f "$TEST_CERTS_DVLS_CRT" ] && USE_SERVER_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_DVLS_KEY" ] && USE_SERVER_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_GATEWAY_CRT" ] && USE_SERVER_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_GATEWAY_KEY" ] && USE_SERVER_CERTIFICATES=false
-[ ! -f "$TEST_CERTS_CA" ] && USE_SERVER_CERTIFICATES=false
-
-# Check if provisioner keys exist
+# Check which certificates exist individually
+USE_CA_CERT=true
+USE_DVLS_CERTS=true
+USE_GATEWAY_CERTS=true
 USE_PROVISIONER_KEYS=true
-[ ! -f "$TEST_CERTS_PROVISIONER_PUB" ] && USE_PROVISIONER_KEYS=false
+
+[ ! -f "$TEST_CERTS_CA" ]               && USE_CA_CERT=false
+[ ! -f "$TEST_CERTS_CA_KEY" ]           && USE_CA_CERT=false  # ca.key needed to sign new certs
+[ ! -f "$TEST_CERTS_DVLS_CRT" ]         && USE_DVLS_CERTS=false
+[ ! -f "$TEST_CERTS_DVLS_KEY" ]         && USE_DVLS_CERTS=false
+[ ! -f "$TEST_CERTS_GATEWAY_CRT" ]      && USE_GATEWAY_CERTS=false
+[ ! -f "$TEST_CERTS_GATEWAY_KEY" ]      && USE_GATEWAY_CERTS=false
+[ ! -f "$TEST_CERTS_PROVISIONER_PUB" ]  && USE_PROVISIONER_KEYS=false
 [ ! -f "$TEST_CERTS_PROVISIONER_PRIV" ] && USE_PROVISIONER_KEYS=false
 
-# All certificates exist if both server certs and provisioner keys exist
+# Derived: server certs = CA + DVLS + Gateway all present
+USE_SERVER_CERTIFICATES=true
+[ "$USE_CA_CERT" = false ]       && USE_SERVER_CERTIFICATES=false
+[ "$USE_DVLS_CERTS" = false ]    && USE_SERVER_CERTIFICATES=false
+[ "$USE_GATEWAY_CERTS" = false ] && USE_SERVER_CERTIFICATES=false
+
+# All certificates exist if server certs and provisioner keys are all present
 USE_TEST_CERTIFICATES=true
 [ "$USE_SERVER_CERTIFICATES" = false ] && USE_TEST_CERTIFICATES=false
-[ "$USE_PROVISIONER_KEYS" = false ] && USE_TEST_CERTIFICATES=false
+[ "$USE_PROVISIONER_KEYS" = false ]    && USE_TEST_CERTIFICATES=false
 
 # Function to convert file to base64
 file_to_base64() {
     base64 -w 0 "$1"
 }
 
-# Function to update .env file with certificate
+# Function to update .env file with a key=value pair
 update_env_cert() {
     local key="$1"
     local value="$2"
     sed -i "s|^${key}\s*=.*|${key}=\"${value}\"|" .env
 }
 
+# Function to inject all certificates from Certificates/ into .env
+inject_certificates() {
+    local dvls_crt_b64 dvls_key_b64 gateway_crt_b64 gateway_key_b64
+    local provisioner_pub_b64 provisioner_priv_b64 ca_b64
+
+    dvls_crt_b64=$(file_to_base64 "$TEST_CERTS_DVLS_CRT")
+    dvls_key_b64=$(file_to_base64 "$TEST_CERTS_DVLS_KEY")
+    gateway_crt_b64=$(file_to_base64 "$TEST_CERTS_GATEWAY_CRT")
+    gateway_key_b64=$(file_to_base64 "$TEST_CERTS_GATEWAY_KEY")
+    provisioner_pub_b64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PUB")
+    provisioner_priv_b64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PRIV")
+    ca_b64=$(file_to_base64 "$TEST_CERTS_CA")
+
+    update_env_cert "DVLS_CERT_CRT_B64" "$dvls_crt_b64"
+    update_env_cert "DVLS_CERT_KEY_B64" "$dvls_key_b64"
+    update_env_cert "DVLS_CA_CERT_B64" "$ca_b64"
+    update_env_cert "GTW_TLS_CERTIFICATE_B64" "$gateway_crt_b64"
+    update_env_cert "GTW_TLS_PRIVATE_KEY_B64" "$gateway_key_b64"
+    update_env_cert "GTW_PROVISIONER_PUBLIC_KEY_B64" "$provisioner_pub_b64"
+    update_env_cert "GTW_PROVISIONER_PRIVATE_KEY_B64" "$provisioner_priv_b64"
+
+    echo "✅ Certificates injected into .env"
+}
+
+GENERATE_SCRIPT="$SCRIPT_DIR/Generate-Certificates.sh"
+
 if [ "$GEN_CERTS" = false ]; then
-    # --no-cert-gen mode: Only work with provisioner keys
+    # --no-cert-gen mode: Use existing certificates only, no generation at all
     echo "⚠️ Certificate generation disabled (--no-cert-gen flag)"
 
     if [ "$USE_SERVER_CERTIFICATES" = false ]; then
@@ -209,141 +303,83 @@ if [ "$GEN_CERTS" = false ]; then
     echo "✅ Found server certificates in Certificates folder"
 
     if [ "$USE_PROVISIONER_KEYS" = false ]; then
-        echo "🔐 Provisioner keys not found, generating them..."
-
-        GENERATE_SCRIPT="$SCRIPT_DIR/Generate-Certificates.sh"
-        if [ -f "$GENERATE_SCRIPT" ]; then
-            pushd "$SCRIPT_DIR" > /dev/null
-            bash "$GENERATE_SCRIPT" --provisioner-only
-            EXIT_CODE=$?
-            popd > /dev/null
-
-            if [ $EXIT_CODE -ne 0 ]; then
-                echo "❌ Failed to generate provisioner keys with exit code $EXIT_CODE"
-                exit 1
-            fi
-            echo "✅ Provisioner keys generated successfully"
-
-            # Verify provisioner keys were created
-            if [ ! -f "$TEST_CERTS_PROVISIONER_PUB" ] || [ ! -f "$TEST_CERTS_PROVISIONER_PRIV" ]; then
-                echo "❌ Provisioner keys were not created successfully"
-                exit 1
-            fi
-        else
-            echo "❌ Generate-Certificates.sh not found at $GENERATE_SCRIPT"
-            exit 1
-        fi
-    else
-        echo "✅ Found provisioner keys in Certificates folder"
+        echo "❌ Provisioner keys not found in Certificates folder"
+        echo "   Cannot run with --no-cert-gen flag without existing provisioner keys"
+        echo "   Either:"
+        echo "   1. Remove the --no-cert-gen flag to generate all certificates and keys, or"
+        echo "   2. Place existing provisioner keys in the Certificates folder"
+        exit 1
     fi
 
-    # Convert all certificates to base64 and inject into .env
-    DVLS_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_CRT")
-    DVLS_KEY_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_KEY")
-    GATEWAY_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_GATEWAY_CRT")
-    GATEWAY_KEY_BASE64=$(file_to_base64 "$TEST_CERTS_GATEWAY_KEY")
-    PROVISIONER_PUB_BASE64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PUB")
-    PROVISIONER_PRIV_BASE64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PRIV")
-    CA_BASE64=$(file_to_base64 "$TEST_CERTS_CA")
+    echo "✅ Found provisioner keys in Certificates folder"
 
-    update_env_cert "DVLS_CERT_CRT_B64" "$DVLS_CRT_BASE64"
-    update_env_cert "DVLS_CERT_KEY_B64" "$DVLS_KEY_BASE64"
-    update_env_cert "DVLS_CA_CERT_B64" "$CA_BASE64"
-    update_env_cert "GTW_TLS_CERTIFICATE_B64" "$GATEWAY_CRT_BASE64"
-    update_env_cert "GTW_TLS_PRIVATE_KEY_B64" "$GATEWAY_KEY_BASE64"
-    update_env_cert "GTW_PROVISIONER_PUBLIC_KEY_B64" "$PROVISIONER_PUB_BASE64"
-    update_env_cert "GTW_PROVISIONER_PRIVATE_KEY_B64" "$PROVISIONER_PRIV_BASE64"
-
-    echo "✅ Certificates injected into .env"
+    inject_certificates
     import_dotenv ".env"
 
 elif [ "$USE_TEST_CERTIFICATES" = true ]; then
-    # GEN_CERTS is true and all certificates exist
+    # GEN_CERTS is true and all certificates already exist — reuse them
     echo "🔐 Found all certificates in Certificates folder, using those..."
-
-    # Convert certificates to base64
-    DVLS_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_CRT")
-    DVLS_KEY_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_KEY")
-    GATEWAY_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_GATEWAY_CRT")
-    GATEWAY_KEY_BASE64=$(file_to_base64 "$TEST_CERTS_GATEWAY_KEY")
-    PROVISIONER_PUB_BASE64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PUB")
-    PROVISIONER_PRIV_BASE64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PRIV")
-    CA_BASE64=$(file_to_base64 "$TEST_CERTS_CA")
-
-    # Update .env file with all certificate values
-    update_env_cert "DVLS_CERT_CRT_B64" "$DVLS_CRT_BASE64"
-    update_env_cert "DVLS_CERT_KEY_B64" "$DVLS_KEY_BASE64"
-    update_env_cert "DVLS_CA_CERT_B64" "$CA_BASE64"
-    update_env_cert "GTW_TLS_CERTIFICATE_B64" "$GATEWAY_CRT_BASE64"
-    update_env_cert "GTW_TLS_PRIVATE_KEY_B64" "$GATEWAY_KEY_BASE64"
-    update_env_cert "GTW_PROVISIONER_PUBLIC_KEY_B64" "$PROVISIONER_PUB_BASE64"
-    update_env_cert "GTW_PROVISIONER_PRIVATE_KEY_B64" "$PROVISIONER_PRIV_BASE64"
-
-    echo "✅ Certificates from Certificates folder injected into .env"
-
-    # Reload environment variables from updated .env
+    inject_certificates
     import_dotenv ".env"
 
 else
-    # GEN_CERTS is true but some certificates are missing
-    echo "⚠️ Some certificates not found in Certificates folder"
-    echo "🔐 Generating all certificates automatically..."
-
-    GENERATE_SCRIPT="$SCRIPT_DIR/Generate-Certificates.sh"
-
-    if [ -f "$GENERATE_SCRIPT" ]; then
-        pushd "$SCRIPT_DIR" > /dev/null
-        bash "$GENERATE_SCRIPT"
-        EXIT_CODE=$?
-        popd > /dev/null
-
-        if [ $EXIT_CODE -ne 0 ]; then
-            echo "❌ Failed to generate certificates with exit code $EXIT_CODE"
-            exit 1
-        fi
-        echo "✅ Certificates generated successfully"
-
-        # Re-check if certificates were created successfully
-        USE_TEST_CERTIFICATES=true
-        [ ! -f "$TEST_CERTS_DVLS_CRT" ] && USE_TEST_CERTIFICATES=false
-        [ ! -f "$TEST_CERTS_DVLS_KEY" ] && USE_TEST_CERTIFICATES=false
-        [ ! -f "$TEST_CERTS_GATEWAY_CRT" ] && USE_TEST_CERTIFICATES=false
-        [ ! -f "$TEST_CERTS_GATEWAY_KEY" ] && USE_TEST_CERTIFICATES=false
-        [ ! -f "$TEST_CERTS_PROVISIONER_PUB" ] && USE_TEST_CERTIFICATES=false
-        [ ! -f "$TEST_CERTS_PROVISIONER_PRIV" ] && USE_TEST_CERTIFICATES=false
-        [ ! -f "$TEST_CERTS_CA" ] && USE_TEST_CERTIFICATES=false
-
-        if [ "$USE_TEST_CERTIFICATES" = false ]; then
-            echo "❌ Certificates were not created successfully"
-            exit 1
-        fi
-
-        # Convert and inject certificates
-        DVLS_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_CRT")
-        DVLS_KEY_BASE64=$(file_to_base64 "$TEST_CERTS_DVLS_KEY")
-        GATEWAY_CRT_BASE64=$(file_to_base64 "$TEST_CERTS_GATEWAY_CRT")
-        GATEWAY_KEY_BASE64=$(file_to_base64 "$TEST_CERTS_GATEWAY_KEY")
-        PROVISIONER_PUB_BASE64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PUB")
-        PROVISIONER_PRIV_BASE64=$(file_to_base64 "$TEST_CERTS_PROVISIONER_PRIV")
-        CA_BASE64=$(file_to_base64 "$TEST_CERTS_CA")
-
-        update_env_cert "DVLS_CERT_CRT_B64" "$DVLS_CRT_BASE64"
-        update_env_cert "DVLS_CERT_KEY_B64" "$DVLS_KEY_BASE64"
-        update_env_cert "DVLS_CA_CERT_B64" "$CA_BASE64"
-        update_env_cert "GTW_TLS_CERTIFICATE_B64" "$GATEWAY_CRT_BASE64"
-        update_env_cert "GTW_TLS_PRIVATE_KEY_B64" "$GATEWAY_KEY_BASE64"
-        update_env_cert "GTW_PROVISIONER_PUBLIC_KEY_B64" "$PROVISIONER_PUB_BASE64"
-        update_env_cert "GTW_PROVISIONER_PRIVATE_KEY_B64" "$PROVISIONER_PRIV_BASE64"
-
-        echo "✅ Certificates from Certificates folder injected into .env"
-        import_dotenv ".env"
-    else
+    # GEN_CERTS is true and some certificates are missing — generate only what's needed
+    if [ ! -f "$GENERATE_SCRIPT" ]; then
         echo "❌ Generate-Certificates.sh not found at $GENERATE_SCRIPT"
         exit 1
     fi
+
+    run_generate() {
+        local flags="$1"
+        pushd "$SCRIPT_DIR" > /dev/null
+        bash "$GENERATE_SCRIPT" $flags
+        local exit_code=$?
+        popd > /dev/null
+        if [ $exit_code -ne 0 ]; then
+            echo "❌ Generate-Certificates.sh failed with exit code $exit_code"
+            exit 1
+        fi
+    }
+
+    if [ "$USE_CA_CERT" = false ] || [ "$USE_DVLS_CERTS" = false ]; then
+        # CA or DVLS missing — must regenerate full set (CA + DVLS + GTW)
+        echo "⚠️ CA or DVLS certificates missing — generating full certificate set..."
+        run_generate ""
+        echo "✅ All certificates generated successfully"
+
+    elif [ "$USE_GATEWAY_CERTS" = false ]; then
+        # Only Gateway certs missing — preserve existing CA + DVLS
+        echo "⚠️ Gateway certificates missing — generating Gateway certs only..."
+        run_generate "--gateway-only"
+        echo "✅ Gateway certificates generated successfully"
+
+    elif [ "$USE_PROVISIONER_KEYS" = false ]; then
+        # Only provisioner keys missing
+        echo "⚠️ Provisioner keys missing — generating provisioner keys only..."
+        run_generate "--provisioner-only"
+        echo "✅ Provisioner keys generated successfully"
+    fi
+
+    # Verify all certificates are now present
+    USE_TEST_CERTIFICATES=true
+    [ ! -f "$TEST_CERTS_DVLS_CRT" ] && USE_TEST_CERTIFICATES=false
+    [ ! -f "$TEST_CERTS_DVLS_KEY" ] && USE_TEST_CERTIFICATES=false
+    [ ! -f "$TEST_CERTS_GATEWAY_CRT" ] && USE_TEST_CERTIFICATES=false
+    [ ! -f "$TEST_CERTS_GATEWAY_KEY" ] && USE_TEST_CERTIFICATES=false
+    [ ! -f "$TEST_CERTS_PROVISIONER_PUB" ] && USE_TEST_CERTIFICATES=false
+    [ ! -f "$TEST_CERTS_PROVISIONER_PRIV" ] && USE_TEST_CERTIFICATES=false
+    [ ! -f "$TEST_CERTS_CA" ] && USE_TEST_CERTIFICATES=false
+
+    if [ "$USE_TEST_CERTIFICATES" = false ]; then
+        echo "❌ Certificates were not created successfully"
+        exit 1
+    fi
+
+    inject_certificates
+    import_dotenv ".env"
 fi
 
-# Check and import CA certificate if not trusted (Linux-specific)
+# Check and import CA certificate if not trusted
 if [ "$SKIP_CA_VALIDATION" = false ]; then
     CA_CERT_PATH="$SCRIPT_DIR/Certificates/ca.crt"
     if [ -f "$CA_CERT_PATH" ]; then
@@ -355,8 +391,22 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
         echo "   Subject: $CA_SUBJECT"
         echo "   Fingerprint: $CA_FINGERPRINT"
 
+        if [ "$IS_WINDOWS" = true ]; then
+            # Windows: use certutil to install into the Root store
+            CA_CERT_WIN=$(cygpath -w "$CA_CERT_PATH")
+            EXISTING=$(certutil.exe -store Root 2>/dev/null | grep -i "${CA_FINGERPRINT//:}" || true)
+            if [ -n "$EXISTING" ]; then
+                echo "✅ CA certificate is already trusted on this machine"
+            else
+                echo "🔐 Installing CA certificate to Windows Root store..."
+                if certutil.exe -addstore Root "$CA_CERT_WIN" > /dev/null 2>&1; then
+                    echo "✅ CA certificate installed successfully"
+                else
+                    echo "⚠️ Failed to install CA certificate. Try running as Administrator."
+                fi
+            fi
         # Check if CA is already trusted (Debian/Ubuntu)
-        if [ -d "/usr/local/share/ca-certificates" ]; then
+        elif [ -d "/usr/local/share/ca-certificates" ]; then
             CA_INSTALL_PATH="/usr/local/share/ca-certificates/devolutions-ca.crt"
 
             # Check if certificate already exists
