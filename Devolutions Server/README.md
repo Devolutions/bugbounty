@@ -50,6 +50,10 @@ Certificates are stored in the `Certificates/` folder (gitignored). The script a
 4. **Injects** all certificates into `.env` as Base64-encoded variables at runtime
 5. **Installs** the CA certificate into the system trust store (Linux: `update-ca-certificates` / `update-ca-trust`, Windows: `certutil`)
 
+> **Firefox users (Windows):** Firefox does not use the Windows certificate store by default. After running the script, either:
+> - Go to `about:config` and set `security.enterprise_roots.enabled` to `true`, **or**
+> - Manually import `Certificates/ca.crt` in Firefox → Settings → Privacy & Security → View Certificates → Authorities → Import
+
 To force a full certificate regeneration, delete the `Certificates/` folder and rerun.
 
 # env.local overrides

@@ -400,7 +400,10 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
             else
                 echo "🔐 Installing CA certificate to Windows Root store..."
                 if certutil.exe -addstore Root "$CA_CERT_WIN" > /dev/null 2>&1; then
-                    echo "✅ CA certificate installed successfully"
+                    echo "✅ CA certificate installed successfully (Windows Root store)"
+                    echo "   ℹ️  Chrome/Edge will trust it automatically."
+                    echo "   ℹ️  Firefox: go to about:config and set security.enterprise_roots.enabled=true"
+                    echo "   ℹ️  Or import $CA_CERT_WIN manually in Firefox → Settings → View Certificates → Authorities"
                 else
                     echo "⚠️ Failed to install CA certificate. Try running as Administrator."
                 fi
@@ -497,4 +500,26 @@ if docker compose up -d; then
 else
     echo "Error: Failed to start Docker Compose."
     exit 1
+fi
+
+# Sync the Gateway certificate thumbprint in the database.
+# The pre-seeded SQL image has a fixed thumbprint; every cert regeneration produces a new one.
+# We update the DB after startup so DVLS can verify the Gateway's TLS cert.
+GTW_THUMBPRINT=$(openssl x509 -in "$TEST_CERTS_GATEWAY_CRT" -noout -fingerprint -sha1 2>/dev/null \
+    | sed 's/.*=//' | tr -d ':' | tr 'a-f' 'A-F')
+
+if [ -n "$GTW_THUMBPRINT" ]; then
+    echo "🔑 Syncing Gateway certificate thumbprint in database ($GTW_THUMBPRINT)..."
+    # By the time docker compose up -d returns, sqlserver_db is healthy (DVLS depends_on it).
+    # Use the DVLS SQL user (least-privilege) if available, otherwise SA.
+    if docker compose exec -T sqlserver_db \
+        /opt/mssql-tools18/bin/sqlcmd \
+        -S localhost -U sa -P "$SQL_MSSQL_PASSWORD" \
+        -d dvls_docker \
+        -Q "UPDATE DevolutionsGateway SET CertificateThumbprint='$GTW_THUMBPRINT'" \
+        -C > /dev/null 2>&1; then
+        echo "✅ Gateway certificate thumbprint updated"
+    else
+        echo "⚠️ Could not update Gateway thumbprint — Gateway connections may fail until certs match"
+    fi
 fi
