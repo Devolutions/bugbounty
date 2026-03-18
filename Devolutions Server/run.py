@@ -2,10 +2,9 @@
 """
 Main run script for DVLS Docker setup.
 
-Cross-platform: works on Windows, Linux, and macOS.
+Supports Windows and Linux.
   - Windows : installs CA into the Windows Root store (certutil.exe)
   - Linux   : installs CA into the system store, Chrome NSS db, and Firefox enterprise policy
-  - macOS   : installs CA into the system keychain
 """
 
 from __future__ import annotations
@@ -27,10 +26,9 @@ import generate_certificates
 # ---------------------------------------------------------------------------
 # Platform detection
 # ---------------------------------------------------------------------------
-SYSTEM = platform.system()   # "Windows" | "Linux" | "Darwin"
+SYSTEM = platform.system()   # "Windows" | "Linux"
 IS_WINDOWS = SYSTEM == "Windows"
 IS_LINUX = SYSTEM == "Linux"
-IS_MACOS = SYSTEM == "Darwin"
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +36,7 @@ IS_MACOS = SYSTEM == "Darwin"
 # ---------------------------------------------------------------------------
 
 def _require_privileges(script_args: list[str]) -> None:
-    """Ensure the process has admin/root rights; re-exec with sudo on Linux/macOS."""
+    """Ensure the process has admin/root rights; re-exec with sudo on Linux."""
     if IS_WINDOWS:
         import ctypes
         if not ctypes.windll.shell32.IsUserAnAdmin():
@@ -209,14 +207,22 @@ def _install_ca_windows(ca_cert: Path) -> None:
         print("⚠️  Failed to install CA certificate. Try running as Administrator.")
 
 
+def _ask_yes_no(prompt: str) -> bool:
+    """Ask a yes/no question, default yes. Returns True for yes."""
+    answer = input(f"{prompt} [Y/n]: ").strip().lower()
+    return answer in ("", "y", "yes")
+
+
 def _install_ca_linux_debian(ca_cert: Path) -> None:
     install_path = Path("/usr/local/share/ca-certificates/devolutions-ca.crt")
     print("🔐 Installing CA certificate to system trust store (Debian/Ubuntu)...")
     shutil.copy2(ca_cert, install_path)
     subprocess.run(["update-ca-certificates", "--fresh"], check=True)
     print("✅ CA certificate installed successfully")
-    _configure_chrome_linux(ca_cert)
-    _configure_firefox_linux(ca_cert)
+    if _ask_yes_no("   Trust CA in Chrome (~/.pki/nssdb)?"):
+        _configure_chrome_linux(ca_cert)
+    if _ask_yes_no("   Trust CA in Firefox (enterprise policy)?"):
+        _configure_firefox_linux(ca_cert)
 
 
 def _install_ca_linux_rhel(ca_cert: Path) -> None:
@@ -225,22 +231,10 @@ def _install_ca_linux_rhel(ca_cert: Path) -> None:
     shutil.copy2(ca_cert, install_path)
     subprocess.run(["update-ca-trust"], check=True)
     print("✅ CA certificate installed successfully")
-    _configure_chrome_linux(ca_cert)
-    _configure_firefox_linux(ca_cert)
-
-
-def _install_ca_macos(ca_cert: Path) -> None:
-    print("🔐 Installing CA certificate to macOS system keychain...")
-    result = subprocess.run([
-        "security", "add-trusted-cert",
-        "-d", "-r", "trustRoot",
-        "-k", "/Library/Keychains/System.keychain",
-        str(ca_cert),
-    ], capture_output=True)
-    if result.returncode == 0:
-        print("✅ CA certificate installed successfully (macOS keychain)")
-    else:
-        print(f"⚠️  Failed to install CA certificate: {result.stderr.decode().strip()}")
+    if _ask_yes_no("   Trust CA in Chrome (~/.pki/nssdb)?"):
+        _configure_chrome_linux(ca_cert)
+    if _ask_yes_no("   Trust CA in Firefox (enterprise policy)?"):
+        _configure_firefox_linux(ca_cert)
 
 
 def _install_ca(ca_cert: Path) -> None:
@@ -255,10 +249,9 @@ def _install_ca(ca_cert: Path) -> None:
         else:
             print("⚠️  Unknown Linux distribution. Cannot automatically install CA certificate.")
             print(f"   Please manually add {ca_cert} to your system's trust store.")
-    elif IS_MACOS:
-        _install_ca_macos(ca_cert)
     else:
-        print(f"⚠️  Unsupported OS ({SYSTEM}). Cannot automatically install CA certificate.")
+        print(f"❌ Unsupported OS ({SYSTEM}). Only Windows and Linux are supported.")
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
