@@ -384,70 +384,32 @@ fi
 if [ "$SKIP_CA_VALIDATION" = false ]; then
     CA_CERT_PATH="$SCRIPT_DIR/Certificates/ca.crt"
     if [ -f "$CA_CERT_PATH" ]; then
-        # Get certificate info using openssl
         CA_SUBJECT=$(openssl x509 -in "$CA_CERT_PATH" -noout -subject 2>/dev/null | sed 's/subject=//')
-        CA_FINGERPRINT=$(openssl x509 -in "$CA_CERT_PATH" -noout -fingerprint 2>/dev/null | sed 's/SHA1 Fingerprint=//')
-
-        echo "📋 CA Certificate Info:"
-        echo "   Subject: $CA_SUBJECT"
-        echo "   Fingerprint: $CA_FINGERPRINT"
+        CA_FINGERPRINT=$(openssl x509 -in "$CA_CERT_PATH" -noout -fingerprint -sha1 2>/dev/null | sed 's/.*=//')
+        echo "📋 CA Certificate: $CA_SUBJECT | $CA_FINGERPRINT"
 
         if [ "$IS_WINDOWS" = true ]; then
-            # Windows: use certutil to install into the Root store
             CA_CERT_WIN=$(cygpath -w "$CA_CERT_PATH")
-            EXISTING=$(certutil.exe -store Root 2>/dev/null | grep -i "${CA_FINGERPRINT//:}" || true)
-            if [ -n "$EXISTING" ]; then
-                echo "✅ CA certificate is already trusted on this machine"
+            echo "🔐 Installing CA certificate to Windows Root store..."
+            if certutil.exe -addstore Root "$CA_CERT_WIN" > /dev/null 2>&1; then
+                echo "✅ CA certificate installed successfully (Windows Root store)"
             else
-                echo "🔐 Installing CA certificate to Windows Root store..."
-                if certutil.exe -addstore Root "$CA_CERT_WIN" > /dev/null 2>&1; then
-                    echo "✅ CA certificate installed successfully (Windows Root store)"
-                else
-                    echo "⚠️ Failed to install CA certificate. Try running as Administrator."
-                fi
+                echo "⚠️ Failed to install CA certificate. Try running as Administrator."
             fi
-        # Check if CA is already trusted (Debian/Ubuntu)
+        # Debian/Ubuntu
         elif [ -d "/usr/local/share/ca-certificates" ]; then
             CA_INSTALL_PATH="/usr/local/share/ca-certificates/devolutions-ca.crt"
-
-            if [ -f "$CA_INSTALL_PATH" ]; then
-                EXISTING_FINGERPRINT=$(openssl x509 -in "$CA_INSTALL_PATH" -noout -fingerprint 2>/dev/null | sed 's/SHA1 Fingerprint=//')
-
-                if [ "$EXISTING_FINGERPRINT" = "$CA_FINGERPRINT" ]; then
-                    echo "✅ CA certificate is already trusted on this machine"
-                else
-                    echo "🔐 Updating CA certificate in system trust store..."
-                    cp "$CA_CERT_PATH" "$CA_INSTALL_PATH"
-                    update-ca-certificates
-                    echo "✅ CA certificate updated successfully"
-                fi
-            else
-                echo "🔐 Installing CA certificate to system trust store..."
-                cp "$CA_CERT_PATH" "$CA_INSTALL_PATH"
-                update-ca-certificates
-                echo "✅ CA certificate installed successfully"
-            fi
-        # Check if CA is already trusted (RHEL/CentOS/Fedora)
+            echo "🔐 Installing CA certificate to system trust store..."
+            cp "$CA_CERT_PATH" "$CA_INSTALL_PATH"
+            update-ca-certificates --fresh
+            echo "✅ CA certificate installed successfully"
+        # RHEL/CentOS/Fedora
         elif [ -d "/etc/pki/ca-trust/source/anchors" ]; then
             CA_INSTALL_PATH="/etc/pki/ca-trust/source/anchors/devolutions-ca.crt"
-
-            if [ -f "$CA_INSTALL_PATH" ]; then
-                EXISTING_FINGERPRINT=$(openssl x509 -in "$CA_INSTALL_PATH" -noout -fingerprint 2>/dev/null | sed 's/SHA1 Fingerprint=//')
-
-                if [ "$EXISTING_FINGERPRINT" = "$CA_FINGERPRINT" ]; then
-                    echo "✅ CA certificate is already trusted on this machine"
-                else
-                    echo "🔐 Updating CA certificate in system trust store..."
-                    cp "$CA_CERT_PATH" "$CA_INSTALL_PATH"
-                    update-ca-trust
-                    echo "✅ CA certificate updated successfully"
-                fi
-            else
-                echo "🔐 Installing CA certificate to system trust store..."
-                cp "$CA_CERT_PATH" "$CA_INSTALL_PATH"
-                update-ca-trust
-                echo "✅ CA certificate installed successfully"
-            fi
+            echo "🔐 Installing CA certificate to system trust store..."
+            cp "$CA_CERT_PATH" "$CA_INSTALL_PATH"
+            update-ca-trust
+            echo "✅ CA certificate installed successfully"
         else
             echo "⚠️ Unknown Linux distribution. Cannot automatically install CA certificate."
             echo "   Please manually add $CA_CERT_PATH to your system's trust store."
