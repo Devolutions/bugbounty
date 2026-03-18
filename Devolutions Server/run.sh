@@ -379,6 +379,37 @@ else
     import_dotenv ".env"
 fi
 
+# Configure Firefox on Linux to trust the system CA store
+# Firefox doesn't read the system trust store by default; this sets the preference in all profiles.
+configure_firefox_linux() {
+    # Resolve the real user's home dir (script may be running under sudo)
+    local real_home
+    if [ -n "$SUDO_USER" ]; then
+        real_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    else
+        real_home="$HOME"
+    fi
+
+    local firefox_dir="$real_home/.mozilla/firefox"
+    if [ ! -d "$firefox_dir" ]; then
+        return  # Firefox never launched — no profiles to update
+    fi
+
+    local count=0
+    for profile_dir in "$firefox_dir"/*/; do
+        [ -d "$profile_dir" ] || continue
+        local user_js="$profile_dir/user.js"
+        # Remove any existing setting, then append the correct one
+        [ -f "$user_js" ] && sed -i '/security\.enterprise_roots\.enabled/d' "$user_js"
+        echo 'user_pref("security.enterprise_roots.enabled", true);' >> "$user_js"
+        count=$((count + 1))
+    done
+
+    if [ "$count" -gt 0 ]; then
+        echo "   ✅ Firefox configured to use system CA store ($count profile(s) updated)"
+    fi
+}
+
 # Check and import CA certificate if not trusted
 if [ "$SKIP_CA_VALIDATION" = false ]; then
     CA_CERT_PATH="$SCRIPT_DIR/Certificates/ca.crt"
@@ -431,6 +462,7 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
                 update-ca-certificates
                 echo "✅ CA certificate installed successfully"
             fi
+            configure_firefox_linux
         # Check if CA is already trusted (RHEL/CentOS/Fedora)
         elif [ -d "/etc/pki/ca-trust/source/anchors" ]; then
             CA_INSTALL_PATH="/etc/pki/ca-trust/source/anchors/devolutions-ca.crt"
@@ -452,10 +484,12 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
                 update-ca-trust
                 echo "✅ CA certificate installed successfully"
             fi
+            configure_firefox_linux
         else
             echo "⚠️ Unknown Linux distribution. Cannot automatically install CA certificate."
             echo "   Please manually add $CA_CERT_PATH to your system's trust store."
         fi
+
     else
         echo "❌ CA certificate not found at $CA_CERT_PATH"
         exit 1
