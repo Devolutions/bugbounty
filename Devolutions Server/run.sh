@@ -379,36 +379,6 @@ else
     import_dotenv ".env"
 fi
 
-# Configure Firefox on Linux to trust the system CA store
-# Firefox doesn't read the system trust store by default; this sets the preference in all profiles.
-configure_firefox_linux() {
-    # Resolve the real user's home dir (script may be running under sudo)
-    local real_home
-    if [ -n "$SUDO_USER" ]; then
-        real_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-    else
-        real_home="$HOME"
-    fi
-
-    local firefox_dir="$real_home/.mozilla/firefox"
-    if [ ! -d "$firefox_dir" ]; then
-        return  # Firefox never launched — no profiles to update
-    fi
-
-    local count=0
-    for profile_dir in "$firefox_dir"/*/; do
-        [ -d "$profile_dir" ] || continue
-        local user_js="$profile_dir/user.js"
-        # Remove any existing setting, then append the correct one
-        [ -f "$user_js" ] && sed -i '/security\.enterprise_roots\.enabled/d' "$user_js"
-        echo 'user_pref("security.enterprise_roots.enabled", true);' >> "$user_js"
-        count=$((count + 1))
-    done
-
-    if [ "$count" -gt 0 ]; then
-        echo "   ✅ Firefox configured to use system CA store ($count profile(s) updated)"
-    fi
-}
 
 # Check and import CA certificate if not trusted
 if [ "$SKIP_CA_VALIDATION" = false ]; then
@@ -432,9 +402,6 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
                 echo "🔐 Installing CA certificate to Windows Root store..."
                 if certutil.exe -addstore Root "$CA_CERT_WIN" > /dev/null 2>&1; then
                     echo "✅ CA certificate installed successfully (Windows Root store)"
-                    echo "   ℹ️  Chrome/Edge will trust it automatically."
-                    echo "   ℹ️  Firefox: go to about:config and set security.enterprise_roots.enabled=true"
-                    echo "   ℹ️  Or import $CA_CERT_WIN manually in Firefox → Settings → View Certificates → Authorities"
                 else
                     echo "⚠️ Failed to install CA certificate. Try running as Administrator."
                 fi
@@ -443,9 +410,7 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
         elif [ -d "/usr/local/share/ca-certificates" ]; then
             CA_INSTALL_PATH="/usr/local/share/ca-certificates/devolutions-ca.crt"
 
-            # Check if certificate already exists
             if [ -f "$CA_INSTALL_PATH" ]; then
-                # Compare fingerprints
                 EXISTING_FINGERPRINT=$(openssl x509 -in "$CA_INSTALL_PATH" -noout -fingerprint 2>/dev/null | sed 's/SHA1 Fingerprint=//')
 
                 if [ "$EXISTING_FINGERPRINT" = "$CA_FINGERPRINT" ]; then
@@ -462,7 +427,6 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
                 update-ca-certificates
                 echo "✅ CA certificate installed successfully"
             fi
-            configure_firefox_linux
         # Check if CA is already trusted (RHEL/CentOS/Fedora)
         elif [ -d "/etc/pki/ca-trust/source/anchors" ]; then
             CA_INSTALL_PATH="/etc/pki/ca-trust/source/anchors/devolutions-ca.crt"
@@ -484,7 +448,6 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
                 update-ca-trust
                 echo "✅ CA certificate installed successfully"
             fi
-            configure_firefox_linux
         else
             echo "⚠️ Unknown Linux distribution. Cannot automatically install CA certificate."
             echo "   Please manually add $CA_CERT_PATH to your system's trust store."
