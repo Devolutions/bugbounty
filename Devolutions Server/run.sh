@@ -380,6 +380,66 @@ else
 fi
 
 
+# Install CA into Chrome's NSS database (~/.pki/nssdb) so Chrome trusts it on Linux
+configure_chrome_linux() {
+    local ca_cert="$1"
+
+    if ! command -v certutil &> /dev/null; then
+        echo "⚠️ certutil not found — skipping Chrome NSS db update (install libnss3-tools to fix)"
+        return
+    fi
+
+    # Resolve the invoking user's home directory (script runs as root via sudo)
+    local real_home
+    if [ -n "$SUDO_USER" ]; then
+        real_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    else
+        real_home="$HOME"
+    fi
+
+    local nssdb_dir="$real_home/.pki/nssdb"
+
+    # Create NSS db if it doesn't exist yet
+    if [ ! -d "$nssdb_dir" ]; then
+        mkdir -p "$nssdb_dir"
+        certutil -N --empty-password -d "sql:$nssdb_dir"
+        [ -n "$SUDO_USER" ] && chown -R "$SUDO_USER:" "$nssdb_dir"
+    fi
+
+    # Remove stale entry (ignore error if it wasn't there)
+    certutil -D -n "Devolutions CA" -d "sql:$nssdb_dir" 2>/dev/null || true
+
+    # Add current CA
+    if certutil -A -n "Devolutions CA" -t "C,," -i "$ca_cert" -d "sql:$nssdb_dir" 2>/dev/null; then
+        echo "✅ CA certificate installed to Chrome NSS db ($nssdb_dir)"
+    else
+        echo "⚠️ Failed to install CA certificate to Chrome NSS db"
+    fi
+}
+
+# Install CA via Firefox enterprise policy (Certificates.Install) so Firefox trusts it on Linux
+configure_firefox_linux() {
+    local ca_cert="$1"
+    local firefox_dir="/etc/firefox"
+    local policies_dir="$firefox_dir/policies"
+    local ca_dest="$firefox_dir/devolutions-ca.crt"
+
+    mkdir -p "$policies_dir"
+    cp "$ca_cert" "$ca_dest"
+
+    cat > "$policies_dir/policies.json" << 'FIREFOX_POLICY'
+{
+  "policies": {
+    "Certificates": {
+      "ImportEnterpriseRoots": true,
+      "Install": ["/etc/firefox/devolutions-ca.crt"]
+    }
+  }
+}
+FIREFOX_POLICY
+    echo "✅ Firefox enterprise policy configured (Certificates.Install → $ca_dest)"
+}
+
 # Check and import CA certificate if not trusted
 if [ "$SKIP_CA_VALIDATION" = false ]; then
     CA_CERT_PATH="$SCRIPT_DIR/Certificates/ca.crt"
@@ -403,6 +463,8 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
             cp "$CA_CERT_PATH" "$CA_INSTALL_PATH"
             update-ca-certificates --fresh
             echo "✅ CA certificate installed successfully"
+            configure_chrome_linux "$CA_CERT_PATH"
+            configure_firefox_linux "$CA_CERT_PATH"
         # RHEL/CentOS/Fedora
         elif [ -d "/etc/pki/ca-trust/source/anchors" ]; then
             CA_INSTALL_PATH="/etc/pki/ca-trust/source/anchors/devolutions-ca.crt"
@@ -410,6 +472,8 @@ if [ "$SKIP_CA_VALIDATION" = false ]; then
             cp "$CA_CERT_PATH" "$CA_INSTALL_PATH"
             update-ca-trust
             echo "✅ CA certificate installed successfully"
+            configure_chrome_linux "$CA_CERT_PATH"
+            configure_firefox_linux "$CA_CERT_PATH"
         else
             echo "⚠️ Unknown Linux distribution. Cannot automatically install CA certificate."
             echo "   Please manually add $CA_CERT_PATH to your system's trust store."
