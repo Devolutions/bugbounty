@@ -1,10 +1,22 @@
 #!/usr/bin/env python3
 """Clean Docker containers and data folders for DVLS Docker setup."""
 
+import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
+
+
+def _force_remove(path: Path) -> None:
+    """Remove a directory tree, clearing read-only flags on Windows if needed."""
+    def _on_exc(func, fpath, exc):
+        # Clear read-only bit and retry (common with SQL Server .mdf/.ldf files)
+        os.chmod(fpath, stat.S_IWRITE)
+        func(fpath)
+
+    shutil.rmtree(path, onexc=_on_exc)
 
 
 def run(script_dir: Path) -> None:
@@ -21,7 +33,7 @@ def run(script_dir: Path) -> None:
     for folder in ("data-sql", "data-dvls"):
         p = script_dir / folder
         if p.exists():
-            shutil.rmtree(p)
+            _force_remove(p)
             print(f"   ✅ Removed {folder}/")
 
     for folder in ("data-sql", "data-dvls"):
