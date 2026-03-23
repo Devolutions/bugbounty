@@ -38,13 +38,19 @@ IS_LINUX = SYSTEM == "Linux"
 # ---------------------------------------------------------------------------
 
 def _require_privileges() -> None:
-    """Ensure admin/root rights; re-exec with sudo on Linux."""
+    """Ensure admin/root rights; re-exec elevated on Windows, sudo on Linux."""
     if IS_WINDOWS:
         import ctypes
         if not ctypes.windll.shell32.IsUserAnAdmin():
-            print("❌ This script must be run as Administrator on Windows.")
-            print("   Right-click your terminal and select 'Run as administrator', then try again.")
-            sys.exit(1)
+            print("⚠️  Not running as Administrator. Requesting elevation via UAC...")
+            params = " ".join(f'"{a}"' for a in sys.argv)
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", sys.executable, params, None, 1
+            )
+            if ret <= 32:
+                print(f"❌ UAC elevation failed (ShellExecute returned {ret}).")
+                sys.exit(1)
+            sys.exit(0)
         print("✅ Running as Administrator")
     elif IS_LINUX:
         if os.geteuid() != 0:

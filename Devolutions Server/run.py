@@ -81,7 +81,8 @@ def main() -> None:
     env = _load_env()
     if not env:
         print("⚠️  .env not found — run install.py first")
-
+        sys.exit(1)
+        
     # Check Docker is in Linux containers mode
     os_type = subprocess.run(
         ["docker", "info", "--format", "{{.OSType}}"],

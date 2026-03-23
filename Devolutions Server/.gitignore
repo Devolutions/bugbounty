@@ -7,3 +7,4 @@ certificates
 .env
 .env.backup
 env.local
+__pycache__/

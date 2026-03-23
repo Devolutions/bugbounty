@@ -3,7 +3,7 @@
 Certificate generation script for DVLS Docker setup.
 
 Generates a Certificate Authority and server certificates for DVLS and Gateway.
-Cross-platform: works on Windows, Linux, and macOS without shell path mangling.
+Cross-platform: works on Windows, Linux without shell path mangling.
 """
 
 from __future__ import annotations
