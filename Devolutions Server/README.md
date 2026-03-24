@@ -1,57 +1,124 @@
 # Requirements
-- Docker with Linux containers.
-- Openssl to generate certificates
+
+- Python 3.12+
+- Docker with Linux containers
+- OpenSSL (for certificate generation)
 
 # Setup
 
 > **Warning**
-> We advise changing the variable values in the *.env* file or use any other way. It is your responsability to secure those variables.
+> We advise changing the variable values in the `env.template` file before running. It is your responsibility to secure those variables.
 > Do not use the default provided values.
+
+Copy `env.template` to `env.local` if you want to override specific values without touching the template (see [env.local overrides](#envlocal-overrides)).
 
 # Run
 
-Run this bash script to start the Devolutions Server Linux dockers.
+**Fresh install** (cleans everything, generates certs, starts containers):
 
+```bash
+# Linux (run as root)
+sudo python3 install.py [--skip-ca-validation] [--no-cert-gen]
+
+# Windows (run as Administrator)
+python install.py [--skip-ca-validation] [--no-cert-gen]
 ```
-chmod +x .\run.sh
-chmod +x alpine-ssh/startup.sh
-chmod +x dc1.ad.lab/entrypoint.sh
-.\run.sh [clean] [update] [skip-ca-validation] [no-cert-gen]
+
+**Subsequent starts** (no reinstall, just start containers):
+
+```bash
+# Linux
+sudo python3 run.py [--update]
+
+# Windows
+python run.py [--update]
 ```
 
 ### Optional arguments
-- `clean` : Clears the container data for a fresh start
-- `update` : Pulls the latest Docker images before starting.
-- `skip-ca-validation` : Skips the validation of CA
-- `no-cert-gen` : Does not generate certificate for DVLS and Gateway (LetsEncrypt certificates must be given) 
-    - Configure your certificates via a symlink directly inside Certificates directory
+
+**install.py**
+
+| Flag | Description |
+|------|-------------|
+| `--skip-ca-validation` | Skips installing the CA certificate into the system trust store |
+| `--no-cert-gen` | Skips certificate generation — existing certificates in `Certificates/` are used as-is |
+
+**run.py**
+
+| Flag | Description |
+|------|-------------|
+| `--update` | Pulls the latest Docker images before starting |
 
 To access the server go to https://localhost:5544
 
-### .env file documentation
+# Logs
 
-| Variable Name                          | Description                                                                                                                    |
-|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `SQL_MSSQL_USER`                       | Database user to use.                                                                                                          |
-| `SQL_MSSQL_PASSWORD`                   | Database user password to use.                                                                                                 |
-| `SQL_DVLS_USER`                        | DVLS user to configure in the database.                                                                                        |
-| `SQL_DVLS_PASSWORD`                    | DVLS user password to configure in the database.                                                                               |
-| `SQL_WHITELISTED_ORIGINS`              | DVLS origins whitelist to configure in the database.                                                                           |
-| `DVLS_CONNECTION_STRING`               | Connection string for DVLS to connect to the database.                                                                         |
-| `DVLS_CERT_CONFIG`                     | If set to `0`, you must provide your own certificate through a reverse proxy like nginx.                                       |
-| `DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64` | Base64-encoded decrypted version of `encryption.config` (DPAPI unprotected).                                                   |
-| `DVLS_CERT_CRT_B64`                    | Base64-encoded .crt file for DVLS                                                                                              |
-| `DVLS_CERT_KEY_B64`                    | Base64-encoded .key file for DVLS                                                                                              |
-| `DVLS_CA_CERT_B64`                     | Base64-encoded .ca file for DVLS and Gateway                                                                                   |
-| `GTW_PROVISIONER_PUBLIC_KEY_B64`       | Base64-encoded .pem file for Gateway                                                                                           |
-| `GTW_PROVISIONER_PRIVATE_KEY_B64`      | Base64-encoded .key file for Gateway                                                                                           |
-| `GTW_TLS_CERTIFICATE_B64`              | Base64-encoded .crt file for Gateway                                                                                           |
-| `GTW_TLS_PRIVATE_KEY_B64`              | Base64-encoded .key file for Gateway                                                                                           |
-| `GTW_HOSTNAME`                         | Gateway name for host file                                                                                                     |
+All output from `install.py` and `run.py` is written to `output.log` in the script directory (overwritten on each run). If a script encounters an unexpected error, the console stays open until you press Enter.
 
+# Certificate management
 
+Certificates are stored in the `Certificates/` folder (gitignored). The script automatically:
+
+1. **Generates** a self-signed CA, DVLS server cert, Gateway server cert, and provisioner key pair on first run
+2. **Reuses** existing certificates on subsequent runs (no regeneration unless files are missing)
+3. **Partial regeneration** — if only some certificates are missing, only the missing ones are regenerated:
+   - CA or DVLS missing → full regeneration
+   - Only Gateway certs missing → `--gateway-only` (re-signs against existing CA)
+   - Only provisioner keys missing → `--provisioner-only`
+4. **Injects** all certificates into `.env` as Base64-encoded variables at runtime
+5. **Installs** the CA certificate into the system trust store (Linux: `update-ca-certificates` / `update-ca-trust`, Windows: `certutil`)
+6. **Configures Firefox** automatically on both Windows and Linux to trust the system CA store (no manual import needed)
+
+To force a full certificate regeneration, delete the `Certificates/` folder and rerun.
+
+# env.local overrides
+
+Create an `env.local` file (gitignored) to override specific variables from `env.template` without modifying the template:
+
+```bash
+# env.local — personal overrides, never committed
+SQL_MSSQL_PASSWORD=MyCustomPassword123
+GTW_HOSTNAME=gateway.custom
+```
+
+Values in `env.local` take precedence over `env.template`. Certificate B64 variables are always injected automatically and should not be set manually.
+
+# .env file documentation
+
+The `.env` file is rebuilt from `env.template` (+ `env.local` overrides) on every run. **Do not edit `.env` directly** — changes will be overwritten.
+
+### Configurable variables (in `env.template` / `env.local`)
+
+| Variable | Description |
+|----------|-------------|
+| `SQL_MSSQL_USER` | SQL Server admin username |
+| `SQL_MSSQL_PASSWORD` | SQL Server admin password (also used as SA password) |
+| `SQL_DVLS_USER` | DVLS database username |
+| `SQL_DVLS_PASSWORD` | DVLS database password |
+| `SQL_WHITELISTED_ORIGINS` | DVLS origins whitelist (JSON array) |
+| `DVLS_CONNECTION_STRING` | ADO.NET connection string for DVLS to reach the database |
+| `DVLS_CERT_CONFIG` | Set to `0` to disable built-in TLS (use a reverse proxy instead) |
+| `DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64` | Base64-encoded decrypted `encryption.config` (DPAPI-unprotected) |
+| `GTW_HOSTNAME` | Gateway hostname added to the hosts file (default: `gateway.loc`) |
+
+### Auto-injected variables (do not set manually)
+
+These are populated at runtime from files in `Certificates/`:
+
+| Variable | Source file |
+|----------|-------------|
+| `DVLS_CERT_CRT_B64` | `Certificates/dvls.crt` |
+| `DVLS_CERT_KEY_B64` | `Certificates/dvls.key` |
+| `DVLS_CA_CERT_B64` | `Certificates/ca.crt` |
+| `GTW_TLS_CERTIFICATE_B64` | `Certificates/gtw.crt` |
+| `GTW_TLS_PRIVATE_KEY_B64` | `Certificates/gtw.key` |
+| `GTW_PROVISIONER_PUBLIC_KEY_B64` | `Certificates/gtw-provisioner.pem` |
+| `GTW_PROVISIONER_PRIVATE_KEY_B64` | `Certificates/gtw-provisioner.key` |
 
 # Changelog
+
+- 24/03/2026 - Migrated to Python scripts, added logging to output.log, fixed SQL data folder cleanup
+- 17/03/2026 - Improved .env management, certificate handling, and Windows compatibility
 - 04/03/2026 - Updated containers to v2026.1.6.0
 - 28/01/2026 - Updated containers to v2025.3.14.0
 - 23/10/2025 - Updated containers to v2025.3.4.0

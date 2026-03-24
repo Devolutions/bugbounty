@@ -27,7 +27,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 20
-      start_period: 30s
+      start_period: 15s
       
   dvls_server:
     image: docker.cloudsmith.io/devolutions/bug-bounty/bb-dvls-server-linux:latest
