@@ -1,5 +1,6 @@
 # Requirements
 
+- Python 3.12+
 - Docker with Linux containers
 - OpenSSL (for certificate generation)
 

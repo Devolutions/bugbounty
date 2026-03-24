@@ -5,7 +5,6 @@ import os
 import shutil
 import stat
 import subprocess
-import sys
 from pathlib import Path
 
 
