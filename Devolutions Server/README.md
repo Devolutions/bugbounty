@@ -13,27 +13,40 @@ Copy `env.template` to `env.local` if you want to override specific values witho
 
 # Run
 
-Run this bash script to start the Devolutions Server Linux containers.
+**Fresh install** (cleans everything, generates certs, starts containers):
 
-**Linux:**
 ```bash
-chmod +x run.sh alpine-ssh/startup.sh dc1.ad.lab/entrypoint.sh
-sudo ./run.sh [--clean] [--update] [--skip-ca-validation] [--no-cert-gen]
+# Linux (run as root)
+sudo python3 install.py [--skip-ca-validation] [--no-cert-gen]
+
+# Windows (run as Administrator)
+python install.py [--skip-ca-validation] [--no-cert-gen]
 ```
 
-**Windows (Git Bash / MSYS2 — run as Administrator):**
+**Subsequent starts** (no reinstall, just start containers):
+
 ```bash
-./run.sh [--clean] [--update] [--skip-ca-validation] [--no-cert-gen]
+# Linux
+sudo python3 run.py [--update]
+
+# Windows
+python run.py [--update]
 ```
 
 ### Optional arguments
 
+**install.py**
+
 | Flag | Description |
 |------|-------------|
-| `--clean` | Stops containers, wipes `data-sql`/`data-dvls` for a fresh start |
-| `--update` | Pulls the latest Docker images before starting |
 | `--skip-ca-validation` | Skips installing the CA certificate into the system trust store |
-| `--no-cert-gen` | Skips certificate generation entirely — existing certificates in `Certificates/` are used as-is |
+| `--no-cert-gen` | Skips certificate generation — existing certificates in `Certificates/` are used as-is |
+
+**run.py**
+
+| Flag | Description |
+|------|-------------|
+| `--update` | Pulls the latest Docker images before starting |
 
 To access the server go to https://localhost:5544
 
