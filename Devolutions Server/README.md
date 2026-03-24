@@ -51,6 +51,10 @@ python run.py [--update]
 
 To access the server go to https://localhost:5544
 
+# Logs
+
+All output from `install.py` and `run.py` is written to `output.log` in the script directory (overwritten on each run). If a script encounters an unexpected error, the console stays open until you press Enter.
+
 # Certificate management
 
 Certificates are stored in the `Certificates/` folder (gitignored). The script automatically:
@@ -113,6 +117,7 @@ These are populated at runtime from files in `Certificates/`:
 
 # Changelog
 
+- 24/03/2026 - Migrated to Python scripts, added logging to output.log, fixed SQL data folder cleanup
 - 17/03/2026 - Improved .env management, certificate handling, and Windows compatibility
 - 04/03/2026 - Updated containers to v2026.1.6.0
 - 28/01/2026 - Updated containers to v2025.3.14.0
