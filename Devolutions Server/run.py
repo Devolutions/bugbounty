@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import logger
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CERT_DIR = SCRIPT_DIR / "Certificates"
 
@@ -116,4 +118,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    logger.setup(SCRIPT_DIR)
+    try:
+        main()
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        input("\nPress Enter to exit...")
+        sys.exit(1)

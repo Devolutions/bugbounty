@@ -24,6 +24,7 @@ from pathlib import Path
 
 import clean
 import generate_certificates
+import logger
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -491,4 +492,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    logger.setup(Path(__file__).parent.resolve())
+    try:
+        main()
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        input("\nPress Enter to exit...")
+        sys.exit(1)
