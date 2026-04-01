@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import install as _install
 import logger
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -80,11 +81,17 @@ def main() -> None:
 
     os.chdir(SCRIPT_DIR)
 
+    if args.update:
+        print("\nRegenerating .env...")
+        _install._build_env(SCRIPT_DIR)
+        _install._inject_certificates(SCRIPT_DIR / ".env", CERT_DIR)
+        print("✓ .env regenerated.")
+
     env = _load_env()
     if not env:
         print("⚠️  .env not found — run install.py first")
         sys.exit(1)
-        
+
     # Check Docker is in Linux containers mode
     os_type = subprocess.run(
         ["docker", "info", "--format", "{{.OSType}}"],
@@ -104,7 +111,10 @@ def main() -> None:
         print("✓ Containers updated successfully.")
 
     print("\nStarting Docker Compose...")
-    result = subprocess.run(["docker", "compose", "up", "-d"], cwd=SCRIPT_DIR)
+    up_cmd = ["docker", "compose", "up", "-d"]
+    if args.update:
+        up_cmd.append("--force-recreate")
+    result = subprocess.run(up_cmd, cwd=SCRIPT_DIR)
     if result.returncode != 0:
         print("❌ Failed to start Docker Compose.")
         sys.exit(1)

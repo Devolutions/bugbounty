@@ -97,9 +97,9 @@ def _build_env(script_dir: Path) -> None:
     env_path.write_text(content)
     print("✅ Created .env from env.template")
 
-    local = script_dir / "env.local"
+    local = script_dir / ".env.local"
     if local.exists():
-        print("📝 Applying env.local overrides...")
+        print("📝 Applying .env.local overrides...")
         local_content = env_path.read_text()
         for line in local.read_text().splitlines():
             line = line.strip()
@@ -112,7 +112,7 @@ def _build_env(script_dir: Path) -> None:
             else:
                 local_content += f"\n{line}"
         env_path.write_text(local_content)
-        print("✅ env.local overrides applied")
+        print("✅ .env.local overrides applied")
 
     placeholders = (
         "\n# Certificate variables (auto-generated — do not edit manually)\n"

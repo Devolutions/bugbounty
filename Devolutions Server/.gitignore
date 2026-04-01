@@ -6,6 +6,6 @@
 certificates
 .env
 .env.backup
-env.local
+.env.local
 __pycache__/
 output.log
