@@ -10,7 +10,7 @@
 > We advise changing the variable values in the `env.template` file before running. It is your responsibility to secure those variables.
 > Do not use the default provided values.
 
-Copy `env.template` to `env.local` if you want to override specific values without touching the template (see [env.local overrides](#envlocal-overrides)).
+Copy `env.template` to `.env.local` if you want to override specific values without touching the template (see [.env.local overrides](#envlocal-overrides)).
 
 # Run
 
@@ -47,7 +47,7 @@ python run.py [--update]
 
 | Flag | Description |
 |------|-------------|
-| `--update` | Pulls the latest Docker images before starting |
+| `--update` | Rebuilds `.env` from template, pulls the latest Docker images, and force-recreates all containers |
 
 To access the server go to https://localhost:5544
 
@@ -71,23 +71,23 @@ Certificates are stored in the `Certificates/` folder (gitignored). The script a
 
 To force a full certificate regeneration, delete the `Certificates/` folder and rerun.
 
-# env.local overrides
+# .env.local overrides
 
-Create an `env.local` file (gitignored) to override specific variables from `env.template` without modifying the template:
+Create a `.env.local` file (gitignored) to override specific variables from `env.template` without modifying the template:
 
 ```bash
-# env.local — personal overrides, never committed
+# .env.local — personal overrides, never committed
 SQL_MSSQL_PASSWORD=MyCustomPassword123
 GTW_HOSTNAME=gateway.custom
 ```
 
-Values in `env.local` take precedence over `env.template`. Certificate B64 variables are always injected automatically and should not be set manually.
+Values in `.env.local` take precedence over `env.template`. Certificate B64 variables are always injected automatically and should not be set manually.
 
 # .env file documentation
 
-The `.env` file is rebuilt from `env.template` (+ `env.local` overrides) on every run. **Do not edit `.env` directly** — changes will be overwritten.
+The `.env` file is rebuilt from `env.template` (+ `.env.local` overrides) on every run. **Do not edit `.env` directly** — changes will be overwritten.
 
-### Configurable variables (in `env.template` / `env.local`)
+### Configurable variables (in `env.template` / `.env.local`)
 
 | Variable | Description |
 |----------|-------------|
@@ -117,6 +117,7 @@ These are populated at runtime from files in `Certificates/`:
 
 # Changelog
 
+- 31/03/2026 - Renamed `env.local` to `.env.local`; `--update` on `run.py` now also rebuilds `.env` and force-recreates containers
 - 24/03/2026 - Migrated to Python scripts, added logging to output.log, fixed SQL data folder cleanup
 - 17/03/2026 - Improved .env management, certificate handling, and Windows compatibility
 - 04/03/2026 - Updated containers to v2026.1.6.0
