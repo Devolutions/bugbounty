@@ -3,7 +3,10 @@
 *.exists
 *.ndf
 *.bin
-certificates
+Certificates/*
+data-dvls/*
+data-sql/*
+tmp
 .env
 .env.backup
 .env.local

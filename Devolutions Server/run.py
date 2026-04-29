@@ -87,6 +87,12 @@ def main() -> None:
         _install._inject_certificates(SCRIPT_DIR / ".env", CERT_DIR)
         print("✓ .env regenerated.")
 
+        # Force full SQL reconfiguration so new image/credentials are applied.
+        sentinel = SCRIPT_DIR / "data-sql" / "sql.configured"
+        if sentinel.exists():
+            sentinel.unlink()
+            print("✓ Cleared sql.configured — SQL Server will reconfigure on next start.")
+
     env = _load_env()
     if not env:
         print("⚠️  .env not found — run install.py first")

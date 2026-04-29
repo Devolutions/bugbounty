@@ -117,6 +117,7 @@ These are populated at runtime from files in `Certificates/`:
 
 # Changelog
 
+- 28/04/2026 - `run.py --update` now clears `sql.configured` sentinel so SQL Server reconfigures on new images; `.gitignore` updated to properly ignore `Certificates/`, `data-dvls/`, `data-sql/`, `tmp`
 - 31/03/2026 - Renamed `env.local` to `.env.local`; `--update` on `run.py` now also rebuilds `.env` and force-recreates containers
 - 24/03/2026 - Migrated to Python scripts, added logging to output.log, fixed SQL data folder cleanup
 - 17/03/2026 - Improved .env management, certificate handling, and Windows compatibility
