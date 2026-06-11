@@ -51,6 +51,8 @@ python run.py [--update]
 
 To access the server go to https://localhost:5544
 
+The username and password are setted in your `.env`.
+
 # Logs
 
 All output from `install.py` and `run.py` is written to `output.log` in the script directory (overwritten on each run). If a script encounters an unexpected error, the console stays open until you press Enter.
@@ -93,8 +95,8 @@ The `.env` file is rebuilt from `env.template` (+ `.env.local` overrides) on eve
 |----------|-------------|
 | `SQL_MSSQL_USER` | SQL Server admin username |
 | `SQL_MSSQL_PASSWORD` | SQL Server admin password (also used as SA password) |
-| `SQL_DVLS_USER` | DVLS database username |
-| `SQL_DVLS_PASSWORD` | DVLS database password |
+| `SQL_DVLS_USER` | DVLS username |
+| `SQL_DVLS_PASSWORD` | DVLS password |
 | `SQL_WHITELISTED_ORIGINS` | DVLS origins whitelist (JSON array) |
 | `DVLS_CONNECTION_STRING` | ADO.NET connection string for DVLS to reach the database |
 | `DVLS_CERT_CONFIG` | Set to `0` to disable built-in TLS (use a reverse proxy instead) |
@@ -117,6 +119,7 @@ These are populated at runtime from files in `Certificates/`:
 
 # Changelog
 
+- 10/06/2026 - Updated containers to v2026.2.5.0
 - 28/04/2026 - `run.py --update` now clears `sql.configured` sentinel so SQL Server reconfigures on new images; `.gitignore` updated to properly ignore `Certificates/`, `data-dvls/`, `data-sql/`, `tmp`
 - 31/03/2026 - Renamed `env.local` to `.env.local`; `--update` on `run.py` now also rebuilds `.env` and force-recreates containers
 - 24/03/2026 - Migrated to Python scripts, added logging to output.log, fixed SQL data folder cleanup
