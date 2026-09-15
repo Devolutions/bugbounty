@@ -1,63 +1,130 @@
 services:
-  sqlserver_db:
-    image: docker.cloudsmith.io/devolutions/bug-bounty/bb-dvls-sql-linux:latest
-    tty: true
+  postgres_db:
+    # bb-dvls-sql-linux is PostgreSQL plus the provisioner, in one image. This service runs it with
+    # the stock postgres entrypoint; dvls_seed below runs the same image with seed.py instead.
+    image: ${SQL_IMAGE:-docker.cloudsmith.io/devolutions/bug-bounty/bb-dvls-sql-linux:latest}
     expose:
-      - 1455
-      - 1456
-    ports:
-      - 1455:1433
-      - 1456:1434
+      - 5432
+    # No host port, deliberately: DATABASE_PASSWORD is committed, so publishing one would hand
+    # anyone who can read this repo a login to the database.
+    # For host access while developing, add a docker-compose.dev.yml with ports ["5455:5432"].
     networks:
       internal:
         ipv4_address: 172.30.0.44
     environment:
-      SQL_MSSQL_USER: ${SQL_MSSQL_USER}
-      SQL_MSSQL_PASSWORD: ${SQL_MSSQL_PASSWORD}
-      SQL_DVLS_USER: ${SQL_DVLS_USER}
-      SQL_DVLS_PASSWORD: ${SQL_DVLS_PASSWORD}
-      SQL_WHITELISTED_ORIGINS: ${SQL_WHITELISTED_ORIGINS}
-      PROVISIONER_PUBLIC_KEY_B64: ${GTW_PROVISIONER_PUBLIC_KEY_B64}
-      PROVISIONER_PRIVATE_KEY_B64: ${GTW_PROVISIONER_PRIVATE_KEY_B64}
-      DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64: ${DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64}
+      # Cluster superuser, regenerated per install. Not the DVLS credential.
+      POSTGRES_USER: ${PG_SUPERUSER}
+      POSTGRES_PASSWORD: ${PG_SUPERUSER_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+      # Read by the seed dump's prologue at restore time to create the role DVLS logs in as.
+      # Not baked into the dump: one artifact has to work in repos whose credentials differ.
+      DVLS_DB_USER: ${DATABASE_USERNAME}
+      DVLS_DB_PASSWORD: ${DATABASE_PASSWORD}
     volumes:
-      - ./data-sql:/var/opt/mssql/data
+      # Named volume, not a bind mount: PostgreSQL needs 0700 and its own uid, which Docker Desktop cannot give it.
+      - pgdata:/var/lib/postgresql/data
+      # No initdb mount: the seed dump is baked into the image, so a hunter cannot diverge from
+      # what was published and verified. The dump is a build input, not a runtime path.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:42424"]
-      interval: 10s
-      timeout: 10s
+      # -h 127.0.0.1 is load-bearing: on the socket, pg_isready answers the temporary initdb server mid-restore.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
       retries: 20
-      start_period: 15s
-      
+      start_period: 5s
+
   dvls_server:
-    image: docker.cloudsmith.io/devolutions/bug-bounty/bb-dvls-server-linux:latest
-    user: root
+    # DNS from the DC: Docker's resolver serves no SRV records, which is how AD locates a controller.
+    # 1.1.1.1 is second so external lookups still work (the seeder's licence call) if the DC is down.
+    dns:
+      - 172.30.0.90
+      - 1.1.1.1
+
+    # gateway.loc is a Docker network alias the DC cannot resolve, and /etc/hosts wins over DNS.
+    extra_hosts:
+      - "gateway.loc:172.30.0.50"
+
+    # The default IS the hunter-facing contract; export SERVER_IMAGE to run a local build instead.
+    # Unlike POSTGRES_IMAGE above, which must fail loudly - do not harmonise the two.
+    image: ${SERVER_IMAGE:-docker.cloudsmith.io/devolutions/bug-bounty/bb-dvls-server-linux:latest}
     depends_on:
-      sqlserver_db:
+      postgres_db:
         condition: service_healthy
     networks:
       internal:
         ipv4_address: 172.30.0.45
     ports:
-      - 5544:443
-      - 5580:80
+      # Same port inside and out: DVLS stamps its OpenIddict issuer from the external access URI.
+      - 5544:5544
     environment:
-        DVLS_CONNECTION_STRING: ${DVLS_CONNECTION_STRING}
-        DVLS_CERT_CONFIG: ${DVLS_CERT_CONFIG}
-        DVLS_CERT_CRT_B64: ${DVLS_CERT_CRT_B64}
-        DVLS_CERT_KEY_B64: ${DVLS_CERT_KEY_B64}
-        DVLS_CA_CERT_B64: ${DVLS_CA_CERT_B64}
-        DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64: ${DVLS_DECRYPTED_ENCRYPTION_CONFIG_B64}
-        SQL_DVLS_USER: ${SQL_DVLS_USER}
-        SQL_DVLS_PASSWORD: ${SQL_DVLS_PASSWORD}
-        SCHEDULER_EMBEDDED: "true"
+      DATABASE_TYPE: PostgreSQL
+      DATABASE_HOST: 172.30.0.44
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME}
+      DATABASE_USERNAME: ${DATABASE_USERNAME}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
 
+      # DVLS_INIT is never set here: schema, administrator and content all arrive from the restored dump.
+      # Enabling it against a restored database fails on the duplicate administrator (exit 139).
+      DVLS_ADMIN_USERNAME: ${DVLS_ADMIN_USERNAME}
+      DVLS_ADMIN_PASSWORD: ${DVLS_ADMIN_PASSWORD}
+
+      # Static across every bug bounty instance, deliberately: hunter findings stay reproducible.
+      DVLS_ENCRYPTION_CONFIG_B64: ${DVLS_ENCRYPTION_CONFIG_B64}
+
+      # DVLS migrates the restored schema on startup, so a release does not need a new dump.
+      DVLS_DATABASE_UPGRADE_ON_STARTUP: "true"
+
+      WEB_SCHEME: https
+      WEB_PORT: 5544
+      HOSTNAME: localhost
+      EXTERNAL_WEB_SCHEME: https
+      EXTERNAL_WEB_HOSTNAME: localhost
+      EXTERNAL_WEB_PORT: 5544
+      TLS_CERTIFICATE_B64: ${DVLS_CERT_CRT_B64}
+      TLS_PRIVATE_KEY_B64: ${DVLS_CERT_KEY_B64}
+      DVLS_CA_CERT_B64: ${DVLS_CA_CERT_B64}
+
+      SCHEDULER_EMBEDDED: "true"
     healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "https://localhost"]
+      # -k because the leaf is signed by this environment's own CA, which curl does not know here.
+      test: ["CMD", "curl", "-fsSk", "-o", "/dev/null", "https://localhost:5544/"]
       interval: 10s
       timeout: 10s
-      retries: 10
+      retries: 30
       start_period: 30s
+
+  dvls_seed:
+    # THE SAME IMAGE as postgres_db, with the provisioner entrypoint instead of postgres. One
+    # artifact for the data tier, and the tooling stays out of dvls_server, which is what hunters
+    # attack. Same override contract as SERVER_IMAGE above.
+    image: ${SQL_IMAGE:-docker.cloudsmith.io/devolutions/bug-bounty/bb-dvls-sql-linux:latest}
+    entrypoint: ["python3", "/seed/seed.py"]
+    depends_on:
+      dvls_server:
+        condition: service_healthy
+    # Shares dvls_server's namespace: the served certificate only covers localhost and 127.0.0.1.
+    network_mode: "service:dvls_server"
+    environment:
+      DVLS_URL: https://localhost:5544
+      DVLS_ADMIN_USERNAME: ${DVLS_ADMIN_USERNAME}
+      DVLS_ADMIN_PASSWORD: ${DVLS_ADMIN_PASSWORD}
+      DVLS_ACCESS_URIS: ${DVLS_ACCESS_URIS}
+      # Devolutions.PowerShell uses HttpClient, which honours the OS trust store and nothing else.
+      DVLS_CA_CERT_B64: ${DVLS_CA_CERT_B64}
+      GTW_PROVISIONER_PUBLIC_KEY_B64: ${GTW_PROVISIONER_PUBLIC_KEY_B64}
+      GTW_PROVISIONER_PRIVATE_KEY_B64: ${GTW_PROVISIONER_PRIVATE_KEY_B64}
+      GTW_TLS_CERTIFICATE_B64: ${GTW_TLS_CERTIFICATE_B64}
+      GTW_HOSTNAME: ${GTW_HOSTNAME}
+      DVLS_ENCRYPTION_CONFIG_B64: ${DVLS_ENCRYPTION_CONFIG_B64}
+      PGHOST: 172.30.0.44
+      PGPORT: "5432"
+      PGDATABASE: ${DATABASE_NAME}
+      PGUSER: ${DATABASE_USERNAME}
+      PGPASSWORD: ${DATABASE_PASSWORD}
+    # No volume: the seeder keeps no state, and re-provisions on every start rather than
+    # skipping when it detects previous work.
+    restart: "no"
 
   ssh_gateway_required:
     image: alpine:latest
@@ -85,7 +152,7 @@ services:
         aliases:
             - gateway.loc
       external:
-        ipv4_address: 172.31.0.50        
+        ipv4_address: 172.31.0.50
         aliases:
             - gateway.loc
     environment:
@@ -125,6 +192,9 @@ services:
     volumes:
       - ./dc1.ad.lab/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
     entrypoint: ["/usr/local/bin/entrypoint.sh"]
+
+volumes:
+  pgdata:
 
 networks:
   internal:

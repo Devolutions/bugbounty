@@ -1,14 +1,18 @@
-*.ldf
-*.mdf
-*.exists
-*.ndf
-*.bin
-Certificates/*
+server/app
+server/encryptionconfigmanager/bin
+downloads
 data-dvls/*
-data-sql/*
-tmp
+# data-sql/ is dead with the SQL Server stack, but it still exists in working trees
+# from before the switch and holds a plaintext SA password. Keep it ignored.
+data-sql/
 .env
+tmp
+tmpclaude-*
+.claude/
+Certificates/*
 .env.backup
 .env.local
 __pycache__/
 output.log
+.env.e2e
+e2e-artifacts/
