@@ -17,10 +17,20 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
+import string
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+# Windows consoles default to cp1252 and cannot encode the status glyphs below.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 import clean
 import generate_certificates
@@ -115,7 +125,11 @@ def _build_env(script_dir: Path) -> None:
         print("✅ .env.local overrides applied")
 
     placeholders = (
-        "\n# Certificate variables (auto-generated — do not edit manually)\n"
+        # ASCII hyphen, not an em dash. This line is written with the platform default
+        # encoding, so a non-ASCII character here becomes cp1252 on Windows and every
+        # tool that reads .env as UTF-8 - including the image validation gate - fails on
+        # the byte. Keep .env ASCII-only.
+        "\n# Certificate variables (auto-generated - do not edit manually)\n"
         'DVLS_CERT_CRT_B64=""\n'
         'DVLS_CERT_KEY_B64=""\n'
         'DVLS_CA_CERT_B64=""\n'
@@ -156,6 +170,11 @@ def _update_env_value(env_path: Path, key: str, value: str) -> None:
     else:
         content += f"\n{replacement}"
     env_path.write_text(content)
+
+    # os.environ must be updated too, not just the file: docker compose gives the inherited
+    # environment PRECEDENCE over .env, and _load_env exported the old values into this process,
+    # so a stale value here silently wins over the one just written.
+    os.environ[key] = value
 
 
 def _inject_certificates(env_path: Path, cert_dir: Path) -> None:
@@ -337,38 +356,85 @@ def _ensure_hosts_entry(hostname: str) -> None:
 # Gateway thumbprint sync
 # ---------------------------------------------------------------------------
 
-def _sync_gateway_thumbprint(cert_dir: Path, sql_password: str) -> None:
-    gtw_cert = cert_dir / "gtw.crt"
-    result = subprocess.run(
-        ["openssl", "x509", "-in", str(gtw_cert), "-noout", "-fingerprint", "-sha1"],
-        capture_output=True, text=True,
-    )
-    match = re.search(r'Fingerprint=([0-9A-Fa-f:]+)', result.stdout, re.IGNORECASE)
-    if not match:
-        print("⚠️  Could not read Gateway certificate fingerprint")
-        return
+def _generate_password(length: int = 24) -> str:
+    """Cluster superuser password. Regenerated per install and never shown to hunters."""
+    alphabet = string.ascii_letters + string.digits + "._-"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
-    thumbprint = match.group(1).replace(":", "").upper()
-    print(f"🔑 Syncing Gateway certificate thumbprint in database ({thumbprint})...")
 
-    sql_result = subprocess.run([
-        "docker", "compose", "exec", "-T", "sqlserver_db",
-        "/opt/mssql-tools18/bin/sqlcmd",
-        "-S", "localhost", "-U", "sa", "-P", sql_password,
-        "-d", "dvls_docker",
-        "-Q", f"UPDATE DevolutionsGateway SET CertificateThumbprint='{thumbprint}'",
-        "-C",
-    ], capture_output=True)
+def _wait_for_seeder(script_dir: Path, service: str = "dvls_seed", timeout: int = 600) -> int:
+    """Block until the one-shot provisioner exits, and return its exit code (-1 on timeout).
 
-    if sql_result.returncode == 0:
-        print("✅ Gateway certificate thumbprint updated")
-    else:
-        print("⚠️  Could not update Gateway thumbprint — Gateway connections may fail until certs match")
+    `docker compose up -d` returns as soon as the container STARTS, so without this the installer
+    reports success while provisioning is still running - or has already failed. Everything the
+    seeder writes is per-install: origin whitelist, trial licence, Gateway provisioner key and
+    certificate thumbprint. A silent failure leaves an environment that looks installed and
+    cannot authenticate through the Gateway. The image validation checks assert the same exit code.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["docker", "compose", "ps", "-a", "--format", "{{.Service}} {{.State}} {{.ExitCode}}"],
+            cwd=script_dir, capture_output=True, text=True,
+        )
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[0] == service and parts[1] == "exited":
+                try:
+                    return int(parts[2])
+                except ValueError:
+                    return -1
+        time.sleep(3)
+    print(f"❌ {service} did not finish within {timeout}s")
+    return -1
+
+
+def _wait_for_healthy(script_dir: Path, service: str, timeout: int = 600) -> bool:
+    """Block until a compose service reports healthy, or the deadline passes."""
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["docker", "compose", "ps", "--format", "{{.Service}} {{.Health}}"],
+            cwd=script_dir, capture_output=True, text=True,
+        )
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == service:
+                last = parts[1]
+                if last == "healthy":
+                    return True
+        time.sleep(5)
+    print(f"❌ {service} did not become healthy within {timeout}s (last state: {last or 'unknown'})")
+    return False
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
+def restart_for_keypair(script_dir: Path) -> bool:
+    """Restart dvls_server so it loads the keypair dvls_seed just wrote. True when healthy again.
+
+    DVLS reads the Gateway provisioner keypair ONCE, at boot, and the dump ships without one, so
+    on a FIRST boot dvls_server generates its own before dvls_seed can write the .env pair and
+    keeps signing with it: the database is correct while every Gateway call fails 401 'invalid
+    signature'. Writing both AppSettings rows is necessary but not sufficient - the write has to
+    be visible at boot.
+
+    Called by install.py AND by run.py. run.py needs it too: the documented SQL Server upgrade
+    path has no pgdata volume yet, so its first --update is a first boot in every way that
+    matters. Leaving it out of one of the two callers is what this function exists to prevent.
+    """
+    print("Restarting Devolutions Server so it picks up the provisioner keypair...")
+    subprocess.run(["docker", "compose", "restart", "dvls_server"], cwd=script_dir, check=False)
+    if not _wait_for_healthy(script_dir, "dvls_server"):
+        print("❌ Devolutions Server did not come back healthy after the provisioner restart.")
+        print("   Check: docker compose logs dvls_server")
+        return False
+    print("✓ Gateway provisioner keypair loaded.")
+    return True
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -395,9 +461,10 @@ def main() -> None:
     print("\n🧹 Running clean install...")
     clean.run(script_dir)
 
-    # Fix data folder ownership on Linux (mssql uid=10001, ubuntu uid=1000)
+    # Fix data folder ownership on Linux (ubuntu uid=1000). The database no longer needs one:
+    # it lives in the pgdata named volume, which Docker creates with the right owner and mode.
     if IS_LINUX:
-        for folder, uid in [("data-sql", 10001), ("data-dvls", 1000)]:
+        for folder, uid in [("data-dvls", 1000)]:
             p = script_dir / folder
             if p.exists():
                 os.chown(p, uid, uid)
@@ -476,6 +543,46 @@ def main() -> None:
         sys.exit(1)
     print("✓ Docker is running in Linux Containers mode.")
 
+    # Fresh cluster superuser password for this install. Written to the file AND to
+    # os.environ, because docker compose gives the inherited environment precedence over
+    # .env - _load_env above exported the old values into this process.
+    _update_env_value(env_path, "PG_SUPERUSER_PASSWORD", _generate_password())
+
+    # DVLS_INIT is intentionally never set: the schema, the administrator and all content
+    # arrive from the seed dump postgres_db restores on first init. Initializing on top of
+    # a restored database fails on the duplicate administrator.
+
+    # REFRESH THE IMAGES FIRST. `docker compose up -d` reuses a cached tag and never re-fetches
+    # it, and clean.run() drops volumes but not images - so an existing hunter re-running
+    # install.py to pick up a new release keeps the :latest they pulled months ago. For the
+    # PostgreSQL migration that is a 2026.2 server, which cannot talk to PostgreSQL at all,
+    # against a freshly restored PostgreSQL database. Works on a clean machine, fails on a used one.
+    #
+    # Failures are tolerated because local builds are tagged with BARE names, which are
+    # not pullable by design. Compose prints a line per image, so a real outage stays visible.
+    # STRICT for everything that comes from a registry, skipped for local builds. Blanket
+    # --ignore-pull-failures preserved the very failure this exists to prevent: with Cloudsmith
+    # unreachable and a stale pre-PostgreSQL :latest cached, the clean install would drop the
+    # volume and then start that stale image anyway. A bare name is a local build - tagged that
+    # way so a stray push is denied - and is not pullable, so those services are excluded BY
+    # NAME rather than by swallowing every error.
+    local_only = set()
+    if (ref := env.get("SERVER_IMAGE", "")) and "/" not in ref:
+        local_only.add("dvls_server")
+    if (ref := env.get("SQL_IMAGE", "")) and "/" not in ref:
+        local_only.update(("postgres_db", "dvls_seed"))
+    pullable = [s for s in ("postgres_db", "dvls_server", "dvls_seed", "ssh_gateway_required",
+                            "devolutions-gateway", "samba-ad-dc") if s not in local_only]
+    if local_only:
+        print(f"Skipping pull for local builds: {chr(44).join(sorted(local_only))}")
+    print("\nRefreshing images (docker compose pull)...")
+    result = subprocess.run(["docker", "compose", "pull", *pullable], cwd=script_dir)
+    if result.returncode != 0:
+        print("❌ Failed to refresh images. Starting now would use whatever is cached locally,")
+        print("   which on an existing machine can be a pre-PostgreSQL build. Fix registry")
+        print("   access and re-run rather than continuing.")
+        sys.exit(1)
+
     # Start Docker Compose
     print("\nStarting Docker Compose...")
     result = subprocess.run(["docker", "compose", "up", "-d"], cwd=script_dir)
@@ -483,12 +590,36 @@ def main() -> None:
         print("❌ Failed to start Docker Compose.")
         sys.exit(1)
 
+    print("")
+    print("Waiting for Devolutions Server to finish initializing...")
+    healthy = _wait_for_healthy(script_dir, "dvls_server")
+
+    # Turned off whether or not the wait succeeded: if initialization did run, a second boot with
+    # it still on is guaranteed to fail, and that is the harder failure to diagnose.
+
+    if not healthy:
+        print("❌ Devolutions Server did not become healthy. Check: docker compose logs dvls_server")
+        sys.exit(1)
+
+    # The provisioner is a separate one-shot service and can fail while dvls_server stays healthy,
+    # so its exit code has to be checked explicitly - see _wait_for_seeder().
+    print("Waiting for the provisioner to finish...")
+    seed_exit = _wait_for_seeder(script_dir)
+    if seed_exit != 0:
+        print(f"❌ dvls_seed exited {seed_exit}. The environment is NOT fully provisioned - the")
+        print("   origin whitelist, trial licence, Gateway provisioner key or certificate")
+        print("   thumbprint may be missing. Check: docker compose logs dvls_seed")
+        sys.exit(1)
+    print("✓ Provisioning finished.")
+
+    if not restart_for_keypair(script_dir):
+        sys.exit(1)
+
     print("================================================")
     print("| Devolutions Server is now up and running!    |")
     print("| It can be accessed at https://localhost:5544 |")
     print("================================================")
 
-    _sync_gateway_thumbprint(cert_dir, env.get("SQL_MSSQL_PASSWORD", ""))
 
 
 if __name__ == "__main__":
