@@ -14,5 +14,3 @@ Certificates/*
 .env.local
 __pycache__/
 output.log
-.env.e2e
-e2e-artifacts/
