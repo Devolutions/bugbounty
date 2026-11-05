@@ -127,7 +127,7 @@ services:
     restart: "no"
 
   ssh_gateway_required:
-    image: alpine:latest
+    image: alpine:3.24.3
     container_name: alpine-ssh
     volumes:
       - ./alpine-ssh/startup.sh:/startup.sh:ro
