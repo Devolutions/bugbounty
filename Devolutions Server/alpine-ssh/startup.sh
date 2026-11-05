@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-apk add --no-cache openssh
+apk add --no-cache 'openssh>=10.3_p1-r2'
 
 mkdir -p /run/sshd
 ssh-keygen -A
